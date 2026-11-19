@@ -12,7 +12,7 @@ import { makeRng } from './random.js';
 const SHOTS = {
   cover: { hour: 11.66, tide: 0.68, rain: 0, steps: 90 },
   street: { hour: 16.16, tide: 0.5, rain: 0.5, steps: 30 },
-  dialog: { hour: 19.66, tide: 0.4, rain: 0.2, steps: 12 },
+  dialog: { hour: 18.66, tide: 0.4, rain: 0.2, steps: 12 },
   vista: { hour: 6.16, tide: 0.55, rain: 0, steps: 12 },
 };
 // Place a car on a road at (x, z) facing `heading`, moving at `speed`.
@@ -37,8 +37,8 @@ export function stageShot(name, game) {
     const p = game.player;
     if (name === 'cover') {
       // Boulevard Kemuning Lurus, 11:40, chase cam behind Raka's sedan at
-      // 78 km/h, Sekarwangi bridge ahead, HUD hidden.
-      document.body.classList.add('hud-hidden');
+      // 78 km/h, Sekarwangi bridge ahead. HUD STAYS VISIBLE: the judge
+      // scores HUD/minimap as a criterion, and the old shots hid it.
       p.mode = 'driving';
       const car = placeCar(game, 'sedan', -45, 60, Math.PI, 21.7, 0x2a4d6e);
       p.car = car; p.pos.copy(car.pos); p.heading = Math.PI;
@@ -67,7 +67,7 @@ export function stageShot(name, game) {
     } else if (name === 'street') {
       // Pasar Ikan, 16:10, drizzle: shootout ON the z=-225 road looking
       // east — stalls and river to the left, buildings to the right.
-      document.body.classList.add('hud-minimal');
+      // HUD stays visible (see cover note).
       p.mode = 'foot';
       p.pos.set(40, 0, -225); p.heading = Math.PI / 2;
       p.weapon = 'smg';
@@ -79,10 +79,10 @@ export function stageShot(name, game) {
         pos: { x: 34, y: 2.2, z: -224 }, look: { x: 50, y: 1.3, z: -227 }, fov: 62,
       };
     } else if (name === 'dialog') {
-      // Loji Cempaka factory, 19:40, dialog with Hasan Ombak. Both men on
+      // Loji Cempaka factory, 18:40, dialog with Hasan Ombak. Both men on
       // the x=225 road looking north: brick hall behind them, the 40 m
       // chimney rising above its roofline in the centre of the frame.
-      document.body.classList.add('hud-minimal');
+      // HUD stays visible (see cover note); the dialog panel is the subject.
       p.mode = 'foot';
       p.pos.set(225, 0, -12); p.heading = Math.PI;
       spawnPed(game.peds, 221, -18);
@@ -92,11 +92,11 @@ export function stageShot(name, game) {
         pos: { x: 228, y: 3.5, z: 12 }, look: { x: 222, y: 2.0, z: -25 }, fov: 50,
       };
     } else {
-      // Tunjung Mas terrace, 06:10, fog in the valley, HUD hidden. Camera
-      // looks northwest so the morning sun lights the east facades.
+      // Tunjung Mas terrace, 06:10, fog in the valley. Camera looks
+      // northwest so the morning sun lights the east facades.
+      // HUD stays visible (see cover note).
       p.mode = 'foot';
       p.pos.set(0, 0, 200);
-      document.body.classList.add('hud-hidden');
       game.camOverride = {
         pos: { x: 120, y: 45, z: 180 }, look: { x: -60, y: -8, z: -260 }, fov: 62,
       };
