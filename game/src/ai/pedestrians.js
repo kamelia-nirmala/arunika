@@ -3,6 +3,7 @@
 import * as THREE from 'three';
 import { clamp, pick, range } from '../random.js';
 import { groundHeight } from '../world/roads.js';
+import { resolveCircle } from '../physics/collision.js';
 
 const SHIRTS = [0xd84a3a, 0x3a7ad8, 0x3a9a5a, 0xd8b13c, 0x8a5ad8, 0xe8e0d0, 0x2a2e33];
 const TARGET = 60, CAP = 75;
@@ -32,6 +33,7 @@ export function spawnPed(pd, x, z) {
   pd.scene.add(m.group);
   const p = { mesh: m, pos: new THREE.Vector3(x, 0, z), heading: pd.rng() * Math.PI * 2,
     speed: 1.3, state: 'walk', panic: 0, waitT: 0, side: pd.rng() < 0.5 ? -1 : 1 };
+  resolveCircle(p.pos, 0.4); // never spawn inside a building
   pd.list.push(p);
   return p;
 }
@@ -67,6 +69,7 @@ export function updatePeds(pd, dt, player) {
     }
     p.pos.x += Math.sin(p.heading) * p.speed * dt;
     p.pos.z += Math.cos(p.heading) * p.speed * dt;
+    resolveCircle(p.pos, 0.4); // sidewalks, not living rooms: stay out of buildings
     p.pos.x = clamp(p.pos.x, -355, 355); p.pos.z = clamp(p.pos.z, -445, 265);
     p.pos.y = groundHeight(p.pos.x, p.pos.z, 0.5);
     const swing = Math.sin(performance.now() * 0.01 + i) * clamp(p.speed / 5.5, 0.2, 1) * 0.45;
