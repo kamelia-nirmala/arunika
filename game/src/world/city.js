@@ -4,7 +4,7 @@
 import * as THREE from 'three';
 import { CITY, DISTRICTS, PALETTE } from '../config.js';
 import { pick, range, clamp } from '../random.js';
-import { addBox } from '../physics/collision.js';
+import { addBox, addOccluderCylinder } from '../physics/collision.js';
 
 const VX = [-315, -225, -135, -45, 45, 135, 225, 315];
 const HZ = [-405, -225, -135, -45, 45, 135, 225];
@@ -116,7 +116,7 @@ export function buildCity(scene, rng) {
         b.castShadow = true; b.receiveShadow = true; scene.add(b);
         const roof = new THREE.Mesh(boxGeo, mat(0x3a3f46, { roughness: 1 }));
         roof.scale.set(w + 0.6, 0.5, dep + 0.6); roof.position.set(bx, h + 0.25, bz); scene.add(roof);
-        addBox(bx - w / 2, bz - dep / 2, bx + w / 2, bz + dep / 2);
+        addBox(bx - w / 2, bz - dep / 2, bx + w / 2, bz + dep / 2, h);
       }
     }
   }
@@ -131,6 +131,8 @@ export function buildCity(scene, rng) {
   const m4 = new THREE.Matrix4(), q = new THREE.Quaternion(), s = new THREE.Vector3();
   palmSpots.forEach(([x, z], i) => {
     const h = range(rng, 6, 9);
+    // Trunk only: the crown sits at y h+1.2, above the chase camera.
+    addOccluderCylinder(x, z, 0.4, 0, h + 0.5);
     m4.compose(new THREE.Vector3(x, h / 2, z), q, new THREE.Vector3(1, h / 7, 1));
     trunks.setMatrixAt(i, m4);
     m4.compose(new THREE.Vector3(x, h + 1.2, z), q, new THREE.Vector3(1, 0.45, 1));
@@ -148,6 +150,7 @@ export function buildCity(scene, rng) {
   const headMat = new THREE.MeshStandardMaterial({ color: 0xd8d2c0, emissive: 0x000000 });
   const heads = new THREE.InstancedMesh(headGeo, headMat, lampSpots.length);
   lampSpots.forEach(([x, z], i) => {
+    addOccluderCylinder(x, z, 0.15, 0, 6.1); // pole only; head is above the camera
     m4.compose(new THREE.Vector3(x, 3, z), q, s.set(1, 1, 1)); poles.setMatrixAt(i, m4);
     m4.compose(new THREE.Vector3(x, 6.1, z), q, s.set(1, 1, 1)); heads.setMatrixAt(i, m4);
   });
@@ -184,6 +187,9 @@ function buildBridge(scene, rng) {
   const pylon = new THREE.Mesh(new THREE.CylinderGeometry(1.6, 3.2, 70, 8), white);
   pylon.position.set(CITY.bridgeX - 4, 6 + 35, -315); pylon.rotation.z = 0.12;
   pylon.castShadow = true; group.add(pylon);
+  // The pylon has no collision box; the camera needs it as a cylinder
+  // (radius covers the 0.12 lean, y from the deck to the top).
+  addOccluderCylinder(CITY.bridgeX - 4, -315, 3.4, 6, 76);
   // Amber beacon band near the top, so the bridge reads at dusk too.
   const band = new THREE.Mesh(new THREE.CylinderGeometry(1.75, 1.85, 1.4, 8),
     new THREE.MeshStandardMaterial({ color: 0xf5a623, emissive: 0x7a4a00, emissiveIntensity: 0.9, roughness: 0.5 }));
@@ -206,12 +212,13 @@ function buildPort(scene, rng) {
     // On the quay strip (z -385..-365), which has ground under it — the
     // harbour basin (z < -390) is open water and containers floated on it.
     const x = range(rng, 120, 320), z = range(rng, -385, -365);
+    const stacked = rng() < 0.3;
     const c = new THREE.Mesh(new THREE.BoxGeometry(6, 2.6, 2.6),
       mat(pick(rng, contColors), { roughness: 0.8, metalness: 0.3 }));
-    c.position.set(x, 1.3 + (rng() < 0.3 ? 2.6 : 0), z);
+    c.position.set(x, 1.3 + (stacked ? 2.6 : 0), z);
     c.rotation.y = rng() < 0.5 ? 0 : Math.PI / 2;
     c.castShadow = true; scene.add(c);
-    addBox(x - 3, z - 3, x + 3, z + 3);
+    addBox(x - 3, z - 3, x + 3, z + 3, stacked ? 5.2 : 2.6);
   }
   // Market stalls with striped awnings along the riverbank promenade.
   for (let i = 0; i < 12; i++) {
@@ -221,7 +228,7 @@ function buildPort(scene, rng) {
     const awn = new THREE.Mesh(new THREE.BoxGeometry(3.6, 0.2, 3),
       mat(pick(rng, [0xe0453a, 0x2fd3c4, 0xf5a623]), { roughness: 0.9 }));
     awn.position.set(x, 2.6, z); scene.add(awn);
-    addBox(x - 1.8, z - 1.5, x + 1.8, z + 1.5);
+    addBox(x - 1.8, z - 1.5, x + 1.8, z + 1.5, 2.6);
   }
 }
 // The factory hall sits flush inside its block (x 175..219, clear of the
@@ -230,13 +237,13 @@ function buildFactory(scene, rng) {
   const brick = mat(0x9e5b45, { roughness: 1 });
   const hall = new THREE.Mesh(new THREE.BoxGeometry(44, 16, 26), brick);
   hall.position.set(197, 8, -40); hall.castShadow = true; hall.receiveShadow = true; scene.add(hall);
-  addBox(197 - 22, -40 - 13, 197 + 22, -40 + 13);
+  addBox(197 - 22, -40 - 13, 197 + 22, -40 + 13, 16);
   const chimney = new THREE.Mesh(new THREE.CylinderGeometry(2.2, 3, 40, 10), mat(0x7d3a2e, { roughness: 1 }));
   chimney.position.set(236, 20, -58); chimney.castShadow = true; scene.add(chimney);
-  addBox(233, -61, 239, -55);
+  addBox(233, -61, 239, -55, 40);
   for (const [x, z] of [[180, -70], [192, -70]]) {
     const silo = new THREE.Mesh(new THREE.CylinderGeometry(4, 4, 16, 10), mat(0x9aa0a4, { roughness: 0.7, metalness: 0.4 }));
     silo.position.set(x, 8, z); silo.castShadow = true; scene.add(silo);
-    addBox(x - 4, z - 4, x + 4, z + 4);
+    addBox(x - 4, z - 4, x + 4, z + 4, 16);
   }
 }
