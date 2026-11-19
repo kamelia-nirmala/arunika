@@ -15,7 +15,7 @@ import { createPlayer, stepPlayer, cameraFor } from './player/controller.js';
 import { createWeapons, fire, updateWeapons, switchWeapon, startReload } from './player/weapons.js';
 import { createTraffic, updateTraffic } from './world/traffic.js';
 import { createPeds, updatePeds, panicPeds } from './ai/pedestrians.js';
-import { createPolice, updatePolice } from './ai/police.js';
+import { createPolice, updatePolice, clearPolice } from './ai/police.js';
 import { createGangs, updateGangs, spawnGang } from './ai/gangs.js';
 import { createBoats, updateBoats } from './ai/boats.js';
 import { createTide, updateTide, tideRising } from './systems/tide.js';
@@ -117,7 +117,7 @@ let lastDamageT = -99, shakeT = 0, mapT = 0, hudT = 0, sirenOn = false;
 function resetGame() {
   for (const c of [...g.traffic.cars]) scene.remove(c.v.mesh.group);
   for (const p of [...g.peds.list]) scene.remove(p.mesh.group);
-  for (const u of [...g.police.cars]) scene.remove(u.v.mesh.group);
+  clearPolice(g.police);
   for (const gg of [...g.gangs.list]) scene.remove(gg.mesh);
   g.traffic.cars.length = 0; g.peds.list.length = 0;
   g.police.cars.length = 0; g.gangs.list.length = 0;
@@ -128,6 +128,7 @@ function resetGame() {
   g.player.reserve = { pistol: 60, shotgun: 24, smg: 90 };
   g.weapons.current = 'pistol'; g.weapons.reloading = 0;
   g.economy.money = 0; g.wanted.heat = 0; g.wanted.stars = 0;
+  g.wanted.losT = 0; g.wanted.coolT = 0; g.overReason = null;
   g.missions.job = null; g.missions.obj = 0; g.missions.done = []; g.missions.available = 1;
   g.hour = DAY.start; g.tide.elapsed = 0;
 }
@@ -156,10 +157,13 @@ document.addEventListener('visibilitychange', () => {
 });
 
 function damagePlayer(n) {
+  if (g.state === 'over') return; // never overwrite an arrest with a KO
   g.player.health -= n;
   lastDamageT = g.time;
   shakeT = 0.3;
-  if (g.player.health <= 0) { g.player.health = 0; gameOver(g); }
+  // Losing all health is a KO — never an arrest. Arrests only come from
+  // the officer flow below (police.arrested), never from damage.
+  if (g.player.health <= 0) { g.player.health = 0; gameOver(g, 'ko'); }
 }
 function step(dt) {
   g.time += dt;
@@ -214,8 +218,14 @@ function step(dt) {
   sirenOn = g.wanted.stars >= 2;
   updateTraffic(g.traffic, dt, p, sirenOn);
   updatePeds(g.peds, dt, p);
-  const policeNear = g.police.cars.some((u) => Math.hypot(u.v.pos.x - p.pos.x, u.v.pos.z - p.pos.z) < 60);
+  // Police "near" for the wanted cooldown: cruisers, on-foot officers, and
+  // the helicopter all keep eyes on the player.
+  const policeNear = g.police.cars.some((u) => Math.hypot(u.v.pos.x - p.pos.x, u.v.pos.z - p.pos.z) < 60)
+    || g.police.nearestOfficer < 60 || g.police.heli.visible;
   if (updatePolice(g.police, dt, p, g.wanted.stars, g.time)) damagePlayer(18);
+  // Arrest: only an on-foot officer who stayed close for ARREST_TIME can
+  // end the game this way — shooting or any other crime only raises heat.
+  if (g.police.arrested) { g.police.arrested = false; gameOver(g, 'arrested'); }
   updateWanted(g.wanted, dt, policeNear);
   updateGangs(g.gangs, dt, p, (x, y, z) => fx.muzzle(x, y, z));
   // Gang fire subtracts health directly (no damagePlayer call inside the
@@ -242,12 +252,18 @@ function step(dt) {
     }
   }
   // Pay off wanted at the Waringin Tepi hideout (E, on foot, no car near).
+  // stepPlayer already consumed E when a car was in range (entering the car
+  // takes priority), so any E reaching here means no car was near. Every
+  // press is consumed here with feedback — a too-early E now toasts
+  // instead of silently vanishing, and nothing stays queued to fire later.
   if (p.mode === 'foot' && input.edge('enter')) {
     const d = Math.hypot(p.pos.x + 270, p.pos.z - 0);
     if (d < 12 && g.wanted.stars > 0) {
       const r = tryPayoff(g.wanted, g.economy.money, policeNear);
       if (r.ok) { g.economy.money -= r.cost; toast(`Suap dibayar — Rp ${r.cost.toLocaleString('id-ID')}. Buruan hilang.`); }
       else toast('Tidak cukup uang atau polisi terlalu dekat');
+    } else {
+      toast('Terlalu jauh dari mobil');
     }
   }
   // Weapons.
@@ -275,6 +291,7 @@ function step(dt) {
       panicPeds(g.peds, p.pos.x, p.pos.z, 25);
       shakeT = 0.12;
     } else if (res === 'kill') {
+      g.audio.shot();
       const o = g.missions.job ? g.missions.job.objectives[g.missions.obj] : null;
       if (o && o.kind === 'kill') g.missions.kills++;
       addHeat(g.wanted, 25);
