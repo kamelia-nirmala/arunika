@@ -32,7 +32,10 @@ export function updateGangs(gangs, dt, player, fx) {
   for (let i = gangs.list.length - 1; i >= 0; i--) {
     const g = gangs.list[i];
     const d = Math.hypot(player.pos.x - g.pos.x, player.pos.z - g.pos.z);
-    if (d > 120) { gangs.scene.remove(g.mesh); gangs.list.splice(i, 1); continue; }
+    // No despawn: gangs only exist because a mission spawned them, and the
+    // kill objective needs all of them — despawning past 120 m made mission
+    // 6 impossible to finish when the player started it from far away.
+    // They walk to the player instead (3.2 m/s), so the fight still comes.
     // Walk at the player; fire inside 30 m.
     const dx = player.pos.x - g.pos.x, dz = player.pos.z - g.pos.z;
     const len = Math.hypot(dx, dz) || 1;
