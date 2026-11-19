@@ -17,7 +17,7 @@ export function buildProps(scene, rng) {
     face.position.y = 9; face.castShadow = true; board.add(face);
     board.position.set(x, 0, z); board.rotation.y = ry;
     scene.add(board);
-    addBox(x - 1, z - 1, x + 1, z + 1);
+    addBox(x - 1, z - 1, x + 1, z + 1, 8); // post; face at y 7..11 is above the camera
   }
   // Bus stops: canopy + bench, every few blocks on the boulevard.
   for (const z of [-180, -45, 90, 180]) {
@@ -35,6 +35,6 @@ export function buildProps(scene, rng) {
     bench.position.y = 0.7; stop.add(bench);
     stop.position.set(-45 - 9, 0, z);
     scene.add(stop);
-    addBox(-45 - 11, z - 1, -45 - 7, z + 1); // bench + shelter block the sidewalk
+    addBox(-45 - 11, z - 1, -45 - 7, z + 1, 2.6); // bench + shelter block the sidewalk
   }
 }
