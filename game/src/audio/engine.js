@@ -57,6 +57,7 @@ export function createAudio() {
     setSkid(amount) { if (ctx) skidGain.gain.setTargetAtTime(amount * 0.12, ctx.currentTime, 0.05); },
     setSiren(amount) { if (ctx) sirenGain.gain.setTargetAtTime(amount * 0.05, ctx.currentTime, 0.1); },
     shot() {
+      if (muted) return; // N / toggleMute silences gunfire like everything else
       if (!ctx) return;
       const t = ctx.currentTime;
       const len = ctx.sampleRate * 0.12;
