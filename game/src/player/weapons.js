@@ -44,12 +44,18 @@ export function fire(w, player, aimDir, gangs, police, fx) {
   const mx = player.pos.x + aimDir.x * 1.2, mz = player.pos.z + aimDir.z * 1.2;
   if (fx) fx(mx, player.pos.y + 1.4, mz);
   // Hit: nearest gang within range and inside a narrow cone.
+  // The aim direction is the camera forward: renormalise its (x, z) part
+  // first. Without that, the camera's downward pitch shrinks the dot
+  // product (0.975 at the default pitch) below the 0.985 threshold, so a
+  // perfectly aimed shot could never hit anything.
+  const al = Math.hypot(aimDir.x, aimDir.z) || 1;
+  const ax = aimDir.x / al, az = aimDir.z / al;
   let best = null, bd = spec.range;
   for (const g of gangs.list) {
     const dx = g.pos.x - player.pos.x, dz = g.pos.z - player.pos.z;
     const d = Math.hypot(dx, dz);
     if (d > spec.range) continue;
-    const dot = (dx * aimDir.x + dz * aimDir.z) / (d || 1);
+    const dot = (dx * ax + dz * az) / (d || 1);
     if (dot > 0.985 && d < bd) { bd = d; best = g; }
   }
   if (best) {
