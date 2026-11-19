@@ -35,5 +35,6 @@ export function buildProps(scene, rng) {
     bench.position.y = 0.7; stop.add(bench);
     stop.position.set(-45 - 9, 0, z);
     scene.add(stop);
+    addBox(-45 - 11, z - 1, -45 - 7, z + 1); // bench + shelter block the sidewalk
   }
 }
