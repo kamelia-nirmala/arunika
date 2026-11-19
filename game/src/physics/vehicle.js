@@ -15,11 +15,21 @@ export function buildCarMesh(kind, color) {
   const spec = VEHICLES[kind];
   const g = new THREE.Group();
   const body = new THREE.Group();
-  const paint = new THREE.MeshStandardMaterial({ color, roughness: 0.35, metalness: 0.5 });
+  // Clearcoat paint: the sun glints on the body instead of a flat matte.
+  const paint = new THREE.MeshPhysicalMaterial({ color, roughness: 0.32, metalness: 0.55,
+    clearcoat: 0.8, clearcoatRoughness: 0.15 });
   const lower = new THREE.Mesh(new THREE.BoxGeometry(spec.wid, 0.62, spec.len), paint);
   lower.position.y = 0.55; lower.castShadow = true; body.add(lower);
   const cabin = new THREE.Mesh(new THREE.BoxGeometry(spec.wid - 0.3, 0.55, spec.len * 0.45), glassMat);
   cabin.position.set(0, 1.1, -spec.len * 0.05); cabin.castShadow = true; body.add(cabin);
+  // Bumpers + side mirrors, so the car reads as a car, not a box.
+  const trimMat = new THREE.MeshStandardMaterial({ color: 0x1c1e22, roughness: 0.6, metalness: 0.3 });
+  for (const s of [-1, 1]) {
+    const bumper = new THREE.Mesh(new THREE.BoxGeometry(spec.wid + 0.06, 0.18, 0.28), trimMat);
+    bumper.position.set(0, 0.42, s * (spec.len / 2 - 0.02)); body.add(bumper);
+    const mirror = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.12, 0.22), trimMat);
+    mirror.position.set(s * (spec.wid / 2 + 0.06), 1.02, spec.len * 0.18); body.add(mirror);
+  }
   // Headlights + taillights.
   const hl = new THREE.MeshStandardMaterial({ color: 0xfff2c0, emissive: 0x554400 });
   for (const s of [-1, 1]) {
@@ -37,6 +47,11 @@ export function buildCarMesh(kind, color) {
     w.castShadow = true; g.add(w); wheels.push(w);
   }
   g.add(body);
+  // Soft contact shadow: grounds the car on the road without a shadow-map
+  // sample per pixel. Sits just above the road/sidewalk planes (0.02/0.04).
+  const blob = new THREE.Mesh(new THREE.PlaneGeometry(spec.wid + 0.7, spec.len + 0.7),
+    new THREE.MeshBasicMaterial({ color: 0x000000, transparent: true, opacity: 0.3, depthWrite: false }));
+  blob.rotation.x = -Math.PI / 2; blob.position.y = 0.06; g.add(blob);
   return { group: g, body, wheels };
 }
 
@@ -74,7 +89,9 @@ export function stepVehicle(v, input, dt, tide) {
   v.drift = drifting;
   const yawBoost = drifting ? 1.8 : 1;
   const yaw = (spd / Math.max(2.6, s.len)) * Math.tan(v.steer) * Math.sign(v.speed || 1) * yawBoost;
-  v.heading += yaw * dt;
+  // steer +1 = turn RIGHT on screen. Heading increases rotate the forward
+  // vector toward screen left, so a right turn must DECREASE heading.
+  v.heading -= yaw * dt;
   // Velocity: forward component follows speed; lateral decays by grip.
   const nfX = Math.sin(v.heading), nfZ = Math.cos(v.heading);
   const fComp = v.vel.x * nfX + v.vel.z * nfZ;
@@ -113,8 +130,8 @@ export function stepVehicle(v, input, dt, tide) {
   v.rpm = clamp(spd / top, 0, 1);
   v.smoke = v.slip > 2.2;
   for (const w of v.mesh.wheels) w.rotation.x += (v.speed / 0.34) * dt;
-  if (v.mesh.wheels[0]) v.mesh.wheels[0].rotation.y = v.steer * 0.8;
-  if (v.mesh.wheels[1]) v.mesh.wheels[1].rotation.y = v.steer * 0.8;
+  if (v.mesh.wheels[0]) v.mesh.wheels[0].rotation.y = -v.steer * 0.8;
+  if (v.mesh.wheels[1]) v.mesh.wheels[1].rotation.y = -v.steer * 0.8;
   v.mesh.group.position.copy(v.pos);
   v.mesh.group.rotation.y = v.heading;
   return res;
