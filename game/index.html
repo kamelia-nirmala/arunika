@@ -3,17 +3,97 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Block Dodger</title>
+<title>ARUNIKA — Open-World Crime</title>
 <style>
-  html, body { margin: 0; height: 100%; overflow: hidden; background: #11141b; }
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #0e1a22;
+    font-family: "Arial Narrow", "Helvetica Neue Condensed", system-ui, sans-serif; }
   #game { position: fixed; inset: 0; width: 100%; height: 100%; display: block; touch-action: none; }
-  /* Read aloud, never shown: the status line screen readers announce. */
   #status { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+  #hud { position: fixed; inset: 0; pointer-events: none; color: #ede6d6; z-index: 5; }
+  .card { background: rgba(14,26,34,0.82); border: 1px solid rgba(47,211,196,0.5); border-radius: 6px; padding: 8px 12px; }
+  #obj-card { position: absolute; top: 14px; left: 14px; max-width: 340px; background: #ede6d6; color: #0e1a22; border-left: 6px solid #2fd3c4; }
+  #obj-title { font-weight: 800; letter-spacing: 2px; font-size: 15px; }
+  #obj-text { font-size: 14px; margin-top: 2px; }
+  #obj-dist { font-size: 12px; color: #5a6a72; margin-top: 2px; }
+  #wanted { position: absolute; top: 14px; right: 14px; text-align: right; display: flex; gap: 10px; align-items: flex-start; }
+  #stars { font-size: 26px; letter-spacing: 3px; color: #ede6d6; text-shadow: 0 0 6px #000; }
+  #tide-tube { width: 26px; height: 110px; border: 2px solid #ede6d6; border-radius: 13px; position: relative; overflow: hidden; background: rgba(14,26,34,0.6); }
+  #tide-fill { position: absolute; bottom: 0; left: 0; right: 0; height: 68%; background: linear-gradient(#2fd3c4, #1a5a8a); }
+  #tide-info { font-size: 12px; text-align: center; margin-top: 4px; }
+  #tide-pct { font-size: 18px; font-weight: 800; }
+  #minimap-wrap { position: absolute; left: 14px; bottom: 14px; }
+  #minimap-canvas { width: 190px; height: 190px; border-radius: 50%; border: 3px solid #ede6d6; background: #0e1a22; display: block; }
+  #speedo { position: absolute; right: 14px; bottom: 14px; text-align: right; }
+  #speed-num { font-size: 44px; font-weight: 800; line-height: 1; }
+  #speed-unit { font-size: 13px; letter-spacing: 2px; }
+  #speed-gear { font-size: 16px; color: #f5a623; }
+  #weapon-line { font-size: 14px; margin-top: 4px; letter-spacing: 1px; }
+  #vitals { position: absolute; left: 220px; bottom: 14px; width: 240px; }
+  .bar { height: 10px; background: rgba(14,26,34,0.7); border: 1px solid #ede6d6; border-radius: 5px; margin-top: 4px; overflow: hidden; }
+  #health-fill { height: 100%; width: 100%; background: #e0453a; }
+  #armor-fill { height: 100%; width: 0%; background: #2fd3c4; }
+  #vitals .row { display: flex; justify-content: space-between; font-size: 13px; margin-top: 6px; letter-spacing: 1px; }
+  #toast { position: absolute; top: 90px; left: 50%; transform: translateX(-50%); background: #f5a623; color: #0e1a22; font-weight: 800; letter-spacing: 1px; padding: 10px 22px; border-radius: 6px; opacity: 0; transition: opacity 0.3s; font-size: 16px; }
+  #toast.show { opacity: 1; }
+  #fps { position: absolute; top: 14px; left: 50%; transform: translateX(-50%); font-size: 12px; opacity: 0.7; }
+  #dialog { position: absolute; left: 50%; bottom: 24px; transform: translateX(-50%); width: min(760px, 92vw); height: 170px; display: none; background: #0e1a22; border: 2px solid #2fd3c4; border-radius: 8px; padding: 10px; pointer-events: auto; cursor: pointer; }
+  #dialog.show { display: flex; gap: 12px; }
+  #dialog-portrait { width: 150px; height: 150px; flex: none; border-radius: 4px; }
+  #dialog-body { flex: 1; }
+  #dialog-name { font-size: 20px; font-weight: 800; letter-spacing: 2px; }
+  #dialog-role { font-size: 12px; color: #8fa8b0; letter-spacing: 1px; }
+  #dialog-text { font-size: 17px; margin-top: 8px; line-height: 1.35; }
+  #dialog-prompt { font-size: 13px; color: #f5a623; margin-top: 8px; animation: blink 1s infinite; }
+  @keyframes blink { 50% { opacity: 0.3; } }
+  .screen { position: fixed; inset: 0; display: none; flex-direction: column; align-items: center; justify-content: center; background: rgba(14,26,34,0.88); color: #ede6d6; z-index: 10; text-align: center; }
+  .screen.show { display: flex; }
+  .screen h1 { font-size: 72px; letter-spacing: 14px; margin: 0; color: #f5a623; }
+  .screen h2 { font-size: 18px; letter-spacing: 4px; font-weight: 400; margin: 6px 0 24px; }
+  .screen p { font-size: 15px; line-height: 1.6; max-width: 560px; }
+  .screen button { pointer-events: auto; cursor: pointer; background: #2fd3c4; color: #0e1a22; border: none; font-size: 18px; font-weight: 800; letter-spacing: 2px; padding: 12px 34px; border-radius: 6px; margin: 6px; }
+  .screen button:hover { background: #f5a623; }
+  .keys { font-size: 13px; color: #8fa8b0; margin-top: 18px; line-height: 1.8; }
+  body.hud-minimal #obj-card, body.hud-minimal #wanted, body.hud-minimal #minimap-wrap, body.hud-minimal #speedo, body.hud-minimal #vitals { display: none; }
+  body.hud-hidden #hud { display: none; }
 </style>
+<script>
+// Surface load-time failures for the screenshot pipeline.
+window.addEventListener('error', (e) => { window.__ARUNIKA_ERROR__ = String((e && e.message) || e); });
+</script>
+<script type="importmap">
+{ "imports": { "three": "./vendor/three.min.js" } }
+</script>
 </head>
 <body>
-<canvas id="game" aria-label="Block Dodger: move the paddle left and right to dodge falling blocks and catch coins"></canvas>
+<canvas id="game" aria-label="ARUNIKA: open-world crime in a tropical coastal city"></canvas>
 <p id="status" role="status" aria-live="polite"></p>
+<div id="hud">
+  <div id="obj-card"><div id="obj-title">ARUNIKA</div><div id="obj-text"></div><div id="obj-dist"></div></div>
+  <div id="wanted"><div><div id="stars">☆☆☆☆☆</div><div id="tide-info"><span id="tide-pct">68%</span> <span id="tide-arrow">▲</span><br><span id="tide-label">TENANG</span></div></div><div id="tide-tube"><div id="tide-fill"></div></div></div>
+  <div id="minimap-wrap"><canvas id="minimap-canvas" width="190" height="190"></canvas></div>
+  <div id="speedo"><div><span id="speed-num">0</span> <span id="speed-unit">KM/JAM</span></div><div id="speed-gear">—</div><div id="weapon-line"><span id="weapon-name">KOBRA-9</span> · <span id="ammo">13 / 60</span></div></div>
+  <div id="vitals"><div class="bar"><div id="health-fill"></div></div><div class="bar"><div id="armor-fill"></div></div><div class="row"><span id="money">Rp 0</span><span id="clock">11:40</span><span id="radio-name">OMBAK FM 88.4</span></div></div>
+  <div id="toast"></div><div id="fps"></div>
+  <div id="dialog"><canvas id="dialog-portrait" width="160" height="160"></canvas><div id="dialog-body"><div id="dialog-name"></div><div id="dialog-role"></div><div id="dialog-text"></div><div id="dialog-prompt"></div></div></div>
+</div>
+<div id="title-screen" class="screen show">
+  <h1>ARUNIKA</h1>
+  <h2>OPEN-WORLD CRIME · KOTA PANTAI TROPIS</h2>
+  <p>Raka kembali ke Arunika — dan terseret jaringan penyelundup pelabuhan. Kendarai, curi, kabur, dan atur pasang-surutnya sendiri.</p>
+  <button id="btn-start">MAIN</button>
+  <div class="keys">WASD mengemudi / jalan · E masuk &amp; curi mobil · Spasi rem · Shift drift<br>Mouse tembak · Q ganti senjata · R isi ulang · J misi · V radio · M peta · P jeda</div>
+</div>
+<div id="pause-menu" class="screen">
+  <h1 style="font-size:44px">JEDA</h1>
+  <button id="btn-resume">LANJUT</button>
+  <button id="btn-save">SIMPAN</button>
+  <button id="btn-quit-title">MENU UTAMA</button>
+</div>
+<div id="gameover-screen" class="screen">
+  <h1 style="font-size:44px">TERTANGKAP</h1>
+  <p>Raka kehabisan napas di jalanan Arunika. Kota ini tidak menunggu siapa pun.</p>
+  <button id="btn-restart">COBA LAGI</button>
+</div>
 <script type="module" src="./src/main.js"></script>
 </body>
 </html>
