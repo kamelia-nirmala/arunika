@@ -8,7 +8,7 @@ export function drawMinimap(canvas, game) {
   const S = canvas.width, C = S / 2;
   const span = 760; // world metres across the map
   const px = (x) => C + (x / span) * S;
-  const pz = (z) => C + (z / span) * S;
+  const pz = (z) => C + ((z + 90) / span) * S; // world z centre is -90, not 0
   g.clearRect(0, 0, S, S);
   // Sea / ground.
   g.fillStyle = '#0e1a22'; g.fillRect(0, 0, S, S);
