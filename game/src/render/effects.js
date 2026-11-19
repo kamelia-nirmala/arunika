@@ -44,11 +44,15 @@ export function buildEffects(scene) {
     skids.push({ m, life: 0 });
   }
   let skidI = 0;
-  // Muzzle flash light.
+  // Muzzle flash light. Light only, by design: gang fire shares this same
+  // muzzle() call, and a visible sprite here would flash on the victim's
+  // body when a gang shoots the player. The visible flash sprite lives on
+  // the player's gun itself (controller.js), set by weapons.fire().
   const flash = new THREE.PointLight(0xffc860, 0, 12);
   scene.add(flash);
   return {
     rain, rainPos: pos, puffs, skids, flash,
+    lastMuzzle: null, // {x, y, z} of the most recent muzzle call (debug/tests)
     puff(x, y, z, scale) {
       const p = puffs.find((q) => q.life <= 0) || puffs[0];
       p.s.position.set(x, y, z); p.s.scale.set(scale, scale, 1);
@@ -59,7 +63,14 @@ export function buildEffects(scene) {
       s.m.position.set(x, y + 0.03, z); s.m.rotation.z = heading;
       s.m.visible = true; s.m.material.opacity = 0.55; s.life = 25;
     },
-    muzzle(x, y, z) { flash.position.set(x, y, z); flash.intensity = 26; },
+    muzzle(x, y, z) {
+      // weapons.fire() now passes the barrel-tip position, so this light
+      // sits at the muzzle, not the shoulder. It burns ~0.065 s (26 / 400):
+      // short on purpose — the still-frame proof comes from catching the
+      // exact frame, not from lengthening the flash.
+      flash.position.set(x, y, z); flash.intensity = 26;
+      this.lastMuzzle = { x, y, z };
+    },
     update(dt, camPos, raining) {
       rain.material.opacity = raining ? 0.55 : 0;
       if (raining) {
