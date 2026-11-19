@@ -35,6 +35,8 @@
   #vitals .row { display: flex; justify-content: space-between; font-size: 13px; margin-top: 6px; letter-spacing: 1px; }
   #toast { position: absolute; top: 90px; left: 50%; transform: translateX(-50%); background: #f5a623; color: #0e1a22; font-weight: 800; letter-spacing: 1px; padding: 10px 22px; border-radius: 6px; opacity: 0; transition: opacity 0.3s; font-size: 16px; }
   #toast.show { opacity: 1; }
+  #enter-prompt { position: absolute; bottom: 210px; left: 50%; transform: translateX(-50%); background: rgba(14,26,34,0.88); border: 1px solid #2fd3c4; color: #ede6d6; font-weight: 800; letter-spacing: 2px; padding: 8px 18px; border-radius: 6px; opacity: 0; transition: opacity 0.2s; font-size: 15px; white-space: nowrap; }
+  #enter-prompt.show { opacity: 1; }
   #fps { position: absolute; top: 14px; left: 50%; transform: translateX(-50%); font-size: 12px; opacity: 0.7; }
   #dialog { position: absolute; left: 50%; bottom: 24px; transform: translateX(-50%); width: min(760px, 92vw); min-height: 170px; display: none; background: #0e1a22; border: 2px solid #2fd3c4; border-radius: 8px; padding: 10px; pointer-events: auto; cursor: pointer; }
   #dialog.show { display: flex; gap: 12px; }
@@ -83,7 +85,7 @@ window.addEventListener('error', (e) => { window.__ARUNIKA_ERROR__ = String((e &
   <div id="minimap-wrap"><canvas id="minimap-canvas" width="190" height="190"></canvas></div>
   <div id="speedo"><div><span id="speed-num">0</span> <span id="speed-unit">KM/JAM</span></div><div id="speed-gear">—</div><div id="weapon-line"><span id="weapon-name">KOBRA-9</span> · <span id="ammo">13 / 60</span></div></div>
   <div id="vitals"><div class="bar"><div id="health-fill"></div></div><div class="bar"><div id="armor-fill"></div></div><div class="row"><span id="money">Rp 0</span><span id="clock">11:40</span><span id="radio-name">OMBAK FM 88.4</span></div></div>
-  <div id="toast"></div><div id="fps"></div>
+  <div id="toast"></div><div id="enter-prompt">TEKAN E — MASUK MOBIL</div><div id="fps"></div>
   <div id="dialog"><canvas id="dialog-portrait" width="160" height="160"></canvas><div id="dialog-body"><div id="dialog-name"></div><div id="dialog-role"></div><div id="dialog-text"></div><div id="dialog-prompt"></div></div></div>
 </div>
 <div id="title-screen" class="screen show">
@@ -102,8 +104,8 @@ window.addEventListener('error', (e) => { window.__ARUNIKA_ERROR__ = String((e &
   <button id="btn-quit-title">MENU UTAMA</button>
 </div>
 <div id="gameover-screen" class="screen">
-  <h1 style="font-size:44px">TERTANGKAP</h1>
-  <p>Raka kehabisan napas di jalanan Arunika. Kota ini tidak menunggu siapa pun.</p>
+  <h1 style="font-size:44px">KO</h1>
+  <p>Raka tumbang di jalanan Arunika. Darahnya habis sebelum bantuan datang.</p>
   <button id="btn-restart">COBA LAGI</button>
 </div>
 <script type="module" src="./src/main.js"></script>
