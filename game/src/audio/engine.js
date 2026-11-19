@@ -2,7 +2,7 @@
 // gunshots, sirens. No audio files, no network. The judge cannot hear it;
 // the player can.
 export function createAudio() {
-  let ctx = null, master = null, engineOsc = null, engineOsc2 = null, engineFilter = null;
+  let ctx = null, master = null, muted = false, engineOsc = null, engineOsc2 = null, engineFilter = null;
   let skidSrc = null, skidGain = null, sirenOsc = null, sirenGain = null;
   function ensure() {
     if (ctx) return true;
@@ -40,7 +40,13 @@ export function createAudio() {
   return {
     get ctx() { return ctx; },
     get master() { return master; },
+    get muted() { return muted; },
     unlock() { if (ensure() && ctx.state === 'suspended') ctx.resume(); },
+    toggleMute() {
+      muted = !muted;
+      if (master) master.gain.value = muted ? 0 : 0.5;
+      return muted;
+    },
     setEngine(rpm, on) {
       if (!ctx) return;
       const f = 50 + rpm * 180;
