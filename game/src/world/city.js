@@ -184,6 +184,10 @@ function buildBridge(scene, rng) {
   const pylon = new THREE.Mesh(new THREE.CylinderGeometry(1.6, 3.2, 70, 8), white);
   pylon.position.set(CITY.bridgeX - 4, 6 + 35, -315); pylon.rotation.z = 0.12;
   pylon.castShadow = true; group.add(pylon);
+  // Amber beacon band near the top, so the bridge reads at dusk too.
+  const band = new THREE.Mesh(new THREE.CylinderGeometry(1.75, 1.85, 1.4, 8),
+    new THREE.MeshStandardMaterial({ color: 0xf5a623, emissive: 0x7a4a00, emissiveIntensity: 0.9, roughness: 0.5 }));
+  band.position.y = 30; pylon.add(band);
   // Cable fan: 16 lines from the pylon top to the deck.
   const pts = [];
   for (let i = 0; i < 16; i++) {
@@ -199,7 +203,9 @@ function buildBridge(scene, rng) {
 function buildPort(scene, rng) {
   const contColors = [0xb8452e, 0x2e6db8, 0x3f8a4a, 0xc9a13b, 0x7a4a8a];
   for (let i = 0; i < 26; i++) {
-    const x = range(rng, 120, 320), z = range(rng, -440, -380);
+    // On the quay strip (z -385..-365), which has ground under it — the
+    // harbour basin (z < -390) is open water and containers floated on it.
+    const x = range(rng, 120, 320), z = range(rng, -385, -365);
     const c = new THREE.Mesh(new THREE.BoxGeometry(6, 2.6, 2.6),
       mat(pick(rng, contColors), { roughness: 0.8, metalness: 0.3 }));
     c.position.set(x, 1.3 + (rng() < 0.3 ? 2.6 : 0), z);
