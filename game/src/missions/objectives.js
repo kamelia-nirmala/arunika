@@ -42,7 +42,10 @@ export function updateMissions(m, dt, game, time) {
   const d = Math.hypot(p.pos.x - o.x, p.pos.z - o.z);
   if (o.time) {
     m.timer += dt;
-    if (m.timer > o.time) { m.failed = 'Waktu habis'; return failMission(m); }
+    // 'survive' is the exception: its time is the GOAL (stay alive that
+    // long), not a limit — failing when the timer passes it would make the
+    // objective impossible (the timer never lands exactly on the value).
+    if (o.kind !== 'survive' && m.timer > o.time) { m.failed = 'Waktu habis'; return failMission(m); }
   }
   let done = false;
   switch (o.kind) {
