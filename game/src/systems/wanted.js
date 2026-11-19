@@ -30,7 +30,11 @@ export function updateWanted(w, dt, policeNear) {
         w.losT = 0;
       }
     }
-  } else w.coolT = 0;
+  } else {
+    // Seen again: the escape clock restarts from zero — a brief gap in the
+    // chase must not count toward slipping away.
+    w.coolT = 0; w.losT = 0;
+  }
   return w.stars !== before;
 }
 // Pay off the heat at a hideout: 250 x stars^2, instant, not while police are close.
