@@ -72,7 +72,7 @@ const g = {
   state: SHOT ? 'shot' : 'title',
   hour: DAY.start, rain: 0, fps: 0, time: 0,
   cars: [], camOverride: null, radioName: 'OMBAK FM 88.4',
-  tideRising: true,
+  tideRising: true, qualityMode: 'auto',
 };
 g.tide = createTide();
 g.economy = createEconomy();
@@ -123,10 +123,37 @@ function resetGame() {
   g.police.cars.length = 0; g.gangs.list.length = 0;
   g.player.pos.set(-45, 0, 20); g.player.heading = Math.PI; g.player.camYaw = Math.PI;
   g.player.health = 100; g.player.armor = 0; g.player.mode = 'foot'; g.player.car = null;
+  g.player.stamina = 100; g.player.weapon = 'pistol';
+  g.player.ammo = { pistol: 13, shotgun: 6, smg: 30 };
+  g.player.reserve = { pistol: 60, shotgun: 24, smg: 90 };
+  g.weapons.current = 'pistol'; g.weapons.reloading = 0;
   g.economy.money = 0; g.wanted.heat = 0; g.wanted.stars = 0;
   g.missions.job = null; g.missions.obj = 0; g.missions.done = []; g.missions.available = 1;
   g.hour = DAY.start; g.tide.elapsed = 0;
 }
+
+// Manual quality: auto (adaptive steps down when slow), low, normal, high.
+// Applies pixel ratio + shadow map size for real — not just a label.
+g.setQuality = (mode) => {
+  g.qualityMode = mode;
+  const apply = (pr, shadow) => {
+    renderer.setPixelRatio(pr);
+    lighting.sun.shadow.mapSize.set(shadow, shadow);
+    if (lighting.sun.shadow.map) { lighting.sun.shadow.map.dispose(); lighting.sun.shadow.map = null; }
+  };
+  if (mode === 'low') { qual = 2; apply(0.75, 512); }
+  else if (mode === 'normal') { qual = 1; apply(1, 1024); }
+  else if (mode === 'high') { qual = 0; apply(Math.min(devicePixelRatio, 2), 2048); }
+  else { qual = 0; lowT = 0; apply(Math.min(devicePixelRatio, 2), 2048); } // auto: start high, adapt down
+};
+// Hidden tab: suspend the audio graph so the engine hum / siren / radio
+// do not keep droning while the tab is in the background.
+document.addEventListener('visibilitychange', () => {
+  const a = g.audio;
+  if (!a.ctx) return;
+  if (document.hidden) a.ctx.suspend();
+  else if (g.state === 'play') a.ctx.resume();
+});
 
 function damagePlayer(n) {
   g.player.health -= n;
@@ -191,6 +218,10 @@ function step(dt) {
   if (updatePolice(g.police, dt, p, g.wanted.stars, g.time)) damagePlayer(18);
   updateWanted(g.wanted, dt, policeNear);
   updateGangs(g.gangs, dt, p, (x, y, z) => fx.muzzle(x, y, z));
+  // Gang fire subtracts health directly (no damagePlayer call inside the
+  // AI), so the death check must live here — otherwise the player can sit
+  // at health <= 0 forever: no game over, and no regen (regen needs > 0).
+  if (p.health <= 0) damagePlayer(0);
   updateBoats(g.boats, dt, g.tide.t, p, (n) => addHeat(g.wanted, n));
   // Missions.
   const ev = updateMissions(g.missions, dt, g, g.time);
@@ -224,6 +255,10 @@ function step(dt) {
   if (input.edge('weapon')) switchWeapon(g.weapons, p);
   if (input.edge('reload')) startReload(g.weapons, p);
   if (input.edge('radio')) { g.radioName = nextStation(g.radio); toast(g.radioName); }
+  if (input.edge('mute')) {
+    const m = g.audio.toggleMute();
+    toast(m ? 'Suara mati (N untuk nyalakan)' : 'Suara nyala');
+  }
   if (input.edge('map')) {
     const cv = document.getElementById('minimap-canvas');
     const big = cv.style.width === '480px';
@@ -259,8 +294,8 @@ function step(dt) {
     }
     if (p.car.damage >= 60) fx.puff(p.car.pos.x, 1.2, p.car.pos.z, 2.2);
   }
-  updateWater(water, g.tide.t);
-  updateLighting(lighting, g.hour, g.rain, lighting.lampMats);
+  updateWater(water, g.tide.t, g.time);
+  updateLighting(lighting, g.hour, g.rain, lighting.lampMats, g.player.pos);
   fx.update(dt, camera.position, g.rain > 0);
   // Audio.
   g.audio.setEngine(p.car ? p.car.rpm : 0, !!p.car);
@@ -277,8 +312,11 @@ function step(dt) {
 let last = performance.now(), acc = 0, fpsAcc = 0, fpsN = 0;
 // Adaptive quality: on a weak machine (sustained < 25 fps) step the shadow
 // map and pixel ratio down — the game stays playable instead of stalling.
+// Only in 'auto' mode: a manual quality choice is never overridden, and the
+// steps only go down, so the quality never oscillates up and down.
 let qual = 0, lowT = 0;
 function adaptQuality(dt) {
+  if (g.qualityMode !== 'auto') return;
   if (g.fps > 0 && g.fps < 25) {
     lowT += dt;
     if (lowT > 3 && qual === 0) {
@@ -307,8 +345,8 @@ function frame(now) {
     const t = now * 0.00004;
     camera.position.set(Math.sin(t) * 260, 90, Math.cos(t) * 260 - 60);
     camera.lookAt(0, 0, -60);
-    updateLighting(lighting, g.hour, 0, lighting.lampMats);
-    updateWater(water, g.tide.t);
+    updateLighting(lighting, g.hour, 0, lighting.lampMats, g.player.pos);
+    updateWater(water, g.tide.t, now / 1000);
     renderer.render(scene, camera);
     return;
   }
