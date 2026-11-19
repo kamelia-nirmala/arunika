@@ -72,11 +72,11 @@ export function updatePolice(pol, dt, player, stars, time) {
     while (dh < -Math.PI) dh += Math.PI * 2;
     const d = Math.hypot(tx - v.pos.x, tz - v.pos.z);
     const inp = {
-      throttle: d > 8 ? 1 : 0.3, steer: clamp(dh * 1.6, -1, 1),
+      throttle: d > 8 ? 1 : 0.3, steer: clamp(-dh * 1.6, -1, 1),
       brake: d < 5, hand: false, surface: 'road',
     };
     // PIT at ★4+: ram the player's rear quarter when alongside.
-    if (stars >= 4 && d < 7) inp.steer = clamp(dh * 2.2, -1, 1);
+    if (stars >= 4 && d < 7) inp.steer = clamp(-dh * 2.2, -1, 1);
     stepVehicle(v, inp, dt, 0.5);
     // Flash the lightbar (spawned units carry barR/barB; a staged cruiser may not).
     if (v.barR && v.barB) {
@@ -99,7 +99,9 @@ export function updatePolice(pol, dt, player, stars, time) {
   pol.shootT -= dt;
   if (stars >= 3 && pol.shootT <= 0 && pol.cars.length) {
     const near = pol.cars.some((u) => Math.hypot(u.v.pos.x - player.pos.x, u.v.pos.z - player.pos.z) < 40);
-    if (near) { player.health -= 18; pol.shootT = 1.5; return true; }
+    // Report the hit; the caller applies the damage once via damagePlayer.
+    // (Subtracting health here too dealt 36 per shot instead of 18.)
+    if (near) { pol.shootT = 1.5; return true; }
   }
   return false;
 }
