@@ -48,7 +48,9 @@ export function buildRoads() {
 
 // Ground height at (x, z): bridge ramps/deck, mud ford. (Terrain is flat;
 // Tunjung Mas reads as a hill through its tall white villas and the vista shot.)
+import { tideLevel } from './water.js';
 export function groundHeight(x, z, tide) {
+  const t = typeof tide === 'number' ? tide : 0.5;
   let y = 0;
   // Bridge: boulevard x=-45, deck y=6 over the river, ramps either side.
   if (Math.abs(x - CITY.bridgeX) < 13) {
@@ -56,8 +58,14 @@ export function groundHeight(x, z, tide) {
     else if (z > -270 && z < -240) y = Math.max(y, CITY.bridgeY * (1 - smooth((z + 270) / 30)));
     else if (z > -390 && z < -360) y = Math.max(y, CITY.bridgeY * smooth((z + 390) / 30));
   }
-  // Mud ford at x=180: only passable at low tide; otherwise deep water.
-  if (Math.abs(x - 180) < 8 && z >= -360 && z <= -270) y = tide <= 0.35 ? -1.5 : -99;
+  if (y > 0) return y; // on the bridge deck or a ramp
+  // Mud ford at x=180: wade at -1.5 in any tide. (It used to return -99 at
+  // high tide, dropping player and cars 99 m through the world.)
+  if (Math.abs(x - 180) < 8 && z >= -360 && z <= -270) return -1.5;
+  // Open water — the river band and the harbour basin: wade just under the
+  // surface instead of strolling on top of it at y=0.
+  if (z >= -360 && z <= -270) return tideLevel(t) - 0.4;
+  if (x >= 180 && x <= 360 && z >= -450 && z < -390) return tideLevel(t) - 0.4;
   return y;
 }
 export function onRoad(x, z) {
