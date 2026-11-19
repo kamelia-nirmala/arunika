@@ -30,14 +30,17 @@ export const JOBS = [
       { kind: 'goto', x: 120, z: -400, r: 8, text: 'Lapor ke Hasan' },
     ] },
   { id: 3, title: 'Telinga di 88.4', giver: 'bimo', type: 'Stealth', reward: 1300,
-    start: { x: -270, z: -90 },
+    start: { x: -225, z: -90 },
     dialog: [
       { who: 'bimo', text: 'Gardu pemancar bea cukai itu memindai tiap kapal. Potong dayanya — dan jangan sampai satu penjaga pun melihatmu.' },
       { who: 'bimo', text: 'Kalau ketahuan, siaranku yang pertama memberitakan penangkapanmu. Bercanda. Setengah bercanda.' },
     ],
     objectives: [
       { kind: 'stealth', x: -270, z: -180, r: 10, text: 'Masuk gardu tanpa terlihat', time: 180 },
-      { kind: 'goto', x: -270, z: -90, r: 8, text: 'Kembali ke Bimo' },
+      // Return point is the roadside at x=-225, NOT (-270,-90): that spot
+      // sits deep inside a building footprint, so the closest a player can
+      // stand is 9.3 m away — outside the old r=8 circle. Uncompletable.
+      { kind: 'goto', x: -225, z: -90, r: 8, text: 'Kembali ke Bimo' },
     ] },
   { id: 4, title: 'Jendela Pasang', giver: 'laras', type: 'Escape', reward: 1800,
     start: { x: -45, z: -200 }, tideGate: 'high',
