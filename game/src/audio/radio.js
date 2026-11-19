@@ -18,6 +18,9 @@ function noteFreq(root, scale, degree) {
 }
 export function radioTick(r, ctx, master, now) {
   if (!r.on || !ctx) return;
+  // If the tab was hidden, rAF stopped and nextT fell far behind: snap it
+  // to now instead of scheduling hundreds of missed notes at once.
+  if (r.nextT < now - 0.5) r.nextT = now;
   const st = STATIONS[r.station];
   const stepDur = 60 / st.bpm / 2;
   while (r.nextT < now + 0.15) {
