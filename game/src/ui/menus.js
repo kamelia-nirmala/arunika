@@ -60,12 +60,28 @@ export function quitToTitle(game) {
   game.ui.pause.classList.remove('show');
   showTitle(game);
 }
-export function gameOver(game) {
+// reason: 'arrested' (caught by an officer) or 'ko' (health ran out).
+// The two endings have different titles and text — an arrest is never
+// described as running out of breath, and a KO is never called an arrest.
+// A game that is already over keeps its first reason.
+export function gameOver(game, reason = 'ko') {
+  if (game.state === 'over') return;
   game.state = 'over';
-  game.ui.over.classList.add('show');
+  game.overReason = reason;
+  const over = game.ui.over;
+  const h = over.querySelector('h1'), p = over.querySelector('p');
+  if (reason === 'arrested') {
+    if (h) h.textContent = 'TERTANGKAP';
+    if (p) p.textContent = 'Petugas berhasil menangkap Raka di jalanan Arunika. Kota ini tidak menunggu siapa pun.';
+  } else {
+    if (h) h.textContent = 'KO';
+    if (p) p.textContent = 'Raka tumbang di jalanan Arunika. Darahnya habis sebelum bantuan datang.';
+  }
+  over.classList.add('show');
 }
 export function restartGame(game) {
   game.ui.over.classList.remove('show');
+  game.overReason = null;
   game.reset();
   game.state = 'play';
 }
