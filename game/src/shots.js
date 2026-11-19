@@ -14,6 +14,7 @@ const SHOTS = {
   street: { hour: 16.16, tide: 0.5, rain: 0.5, steps: 30 },
   dialog: { hour: 18.66, tide: 0.4, rain: 0.2, steps: 12 },
   vista: { hour: 6.16, tide: 0.55, rain: 0, steps: 12 },
+  shooting: { hour: 11.66, tide: 0.68, rain: 0, steps: 33 },
 };
 // Place a car on a road at (x, z) facing `heading`, moving at `speed`.
 function placeCar(game, kind, x, z, heading, speed, color) {
@@ -90,6 +91,28 @@ export function stageShot(name, game) {
       showDialog(JOBS[0].dialog, null);
       game.camOverride = {
         pos: { x: 228, y: 3.5, z: 12 }, look: { x: 222, y: 2.0, z: -25 }, fov: 50,
+      };
+    } else if (name === 'shooting') {
+      // Proof shot for the R3 weapon fix (NOT one of the 4 judge shots):
+      // Raka on foot on the boulevard, pistol raised, firing at a gang
+      // straight ahead. The trigger is held (synthetic mousedown) for the
+      // whole staging run; pistol rof is 4/s, so shots land on steps 1, 17
+      // and 33 (the 0.25 s cooldown is 15 steps, but 0.25 - 15*(1/60) leaves
+      // a +2.8e-17 float residue, so the shot slips one step late each
+      // cycle — 33 steps puts the render right after the third shot), and
+      // the frame is rendered right after it — the ~0.06 s flash is caught
+      // because the render follows the shot, not because the flash was
+      // lengthened. Camera is a close over-the-shoulder view so the pistol
+      // in the hand and the flash at the barrel tip are actually readable.
+      p.mode = 'foot';
+      p.pos.set(-45, 0, 20); p.heading = Math.PI; p.camYaw = Math.PI; p.camPitch = 0.32;
+      spawnGang(game.gangs, -45, 4, 3);
+      const canvas = document.getElementById('game');
+      if (canvas) canvas.dispatchEvent(new MouseEvent('mousedown', { button: 0, bubbles: true, cancelable: true }));
+      game.camera.position.set(-43.5, 2.2, 24.0);
+      game.camera.lookAt(-45, 1.3, 12);
+      game.camOverride = {
+        pos: { x: -43.5, y: 2.2, z: 24.0 }, look: { x: -45, y: 1.3, z: 12 }, fov: 55,
       };
     } else {
       // Tunjung Mas terrace, 06:10, fog in the valley. Camera looks
