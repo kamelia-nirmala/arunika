@@ -1,5 +1,6 @@
 // HUD: objective card, wanted stars, tide tube, speedometer, health/armor,
 // money, clock, radio, ammo, and toasts. All DOM — cheap and always legible.
+import { ARREST_TIME } from '../ai/police.js';
 const $ = (id) => document.getElementById(id);
 let els = null;
 export function bindHud() {
@@ -11,6 +12,7 @@ export function bindHud() {
     healthFill: $('health-fill'), armorFill: $('armor-fill'),
     money: $('money'), clock: $('clock'), radio: $('radio-name'),
     weapon: $('weapon-name'), ammo: $('ammo'), toast: $('toast'), fps: $('fps'),
+    enterPrompt: $('enter-prompt'),
   };
 }
 function starStr(n) {
@@ -54,6 +56,22 @@ export function updateHud(g, dt) {
   els.weapon.textContent = g.weapons ? { pistol: 'KOBRA-9', shotgun: 'BANDOT-12', smg: 'TAWON-45' }[w] : '';
   els.ammo.textContent = p.ammo[w] + ' / ' + p.reserve[w];
   if (g.fps) els.fps.textContent = Math.round(g.fps) + ' fps';
+  // "TEKAN E" prompt: on foot and a live car is within enter range.
+  // Re-asserted every HUD tick so it hides the moment the player walks away.
+  if (els.enterPrompt) {
+    els.enterPrompt.classList.toggle('show',
+      g.state === 'play' && p.mode === 'foot' && !!p.nearCar);
+  }
+  // Arrest warning: an officer is closing in on foot. While one is within
+  // arrest range the countdown shows how long the player has left to flee.
+  // Re-asserted every HUD tick so it stays up until the danger passes.
+  const pol = g.police;
+  if (g.state === 'play' && pol && isFinite(pol.nearestOfficer) && pol.nearestOfficer <= 12) {
+    els.toast.textContent = pol.arrestT > 0
+      ? `POLISI MENDEKAT — KABUR! ${Math.ceil(Math.max(0, ARREST_TIME - pol.arrestT))}`
+      : 'POLISI MENDEKAT — KABUR!';
+    els.toast.classList.add('show');
+  }
 }
 let toastT = null;
 export function toast(text, ms = 3500) {
