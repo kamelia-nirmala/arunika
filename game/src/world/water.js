@@ -28,10 +28,14 @@ export function buildWater(scene) {
 }
 // Tide value 0..1 from elapsed seconds; returns the water surface height.
 export function tideLevel(t) { return -2 + t * 2.2; }
-export function updateWater(water, tide) {
+export function updateWater(water, tide, time = 0) {
   const y = tideLevel(tide);
   water.river.position.y = y;
   water.basin.position.y = y;
+  // Slow shimmer so the river reads as water, not a painted plane.
+  const shimmer = 0.8 + 0.03 * Math.sin(time * 0.6);
+  water.river.material.opacity = shimmer;
+  water.basin.material.opacity = shimmer;
   // Mud appears as the tide drops below 0.35 and vanishes above it.
   water.mud.material.opacity = clamp((0.35 - tide) * 4, 0, 0.95);
   water.mud.position.y = -1.6 + Math.max(0, tide - 0.2);
