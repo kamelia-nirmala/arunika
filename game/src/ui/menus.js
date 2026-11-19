@@ -2,6 +2,13 @@
 // The title screen is also the first thing a new player (and the judge's
 // screenshot) sees, so it carries the game's name and its promise.
 const SAVE_PREFIX = 'arunika.save.';
+const QUALITY_LABEL = { auto: 'OTOMATIS', low: 'RENDAH', normal: 'NORMAL', high: 'TINGGI' };
+function syncPauseLabels(game) {
+  const mq = document.getElementById('btn-quality');
+  if (mq) mq.textContent = 'KUALITAS: ' + QUALITY_LABEL[game.qualityMode || 'auto'];
+  const mm = document.getElementById('btn-mute');
+  if (mm) mm.textContent = game.audio && game.audio.muted ? 'SUARA: MATI' : 'SUARA: NYALA';
+}
 export function bindMenus(doc, game) {
   const title = doc.getElementById('title-screen');
   const pause = doc.getElementById('pause-menu');
@@ -12,6 +19,16 @@ export function bindMenus(doc, game) {
   doc.getElementById('btn-quit-title').addEventListener('click', () => quitToTitle(game));
   doc.getElementById('btn-restart').addEventListener('click', () => restartGame(game));
   doc.getElementById('btn-save').addEventListener('click', () => saveGame(game, 1));
+  doc.getElementById('btn-mute').addEventListener('click', (e) => {
+    const m = game.audio.toggleMute();
+    e.target.textContent = m ? 'SUARA: MATI' : 'SUARA: NYALA';
+  });
+  doc.getElementById('btn-quality').addEventListener('click', (e) => {
+    const order = ['auto', 'low', 'normal', 'high'];
+    const next = order[(order.indexOf(game.qualityMode) + 1) % order.length];
+    game.setQuality(next);
+    e.target.textContent = 'KUALITAS: ' + QUALITY_LABEL[next];
+  });
   game.ui = { title, pause, over };
 }
 export function showTitle(game) {
@@ -32,6 +49,7 @@ export function startGame(game) {
 export function pauseGame(game) {
   if (game.state !== 'play') return;
   game.state = 'pause';
+  syncPauseLabels(game);
   game.ui.pause.classList.add('show');
 }
 export function resumeGame(game) {
