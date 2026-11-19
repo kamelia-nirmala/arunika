@@ -48,5 +48,5 @@ export const KEYS = {
   enter: ['KeyE'], jump: ['KeyF'], sprint: ['ShiftLeft'],
   fire: ['Mouse0'], reload: ['KeyR'], weapon: ['KeyQ'],
   radio: ['KeyV'], map: ['KeyM'], pause: ['Escape', 'KeyP'],
-  mission: ['KeyJ'], horn: ['KeyH'],
+  mission: ['KeyJ'], horn: ['KeyH'], mute: ['KeyN'],
 };
