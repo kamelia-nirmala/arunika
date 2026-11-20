@@ -23,22 +23,73 @@ export function buildPlayerMesh() {
   const skin = new THREE.MeshStandardMaterial({ color: 0xc98d5f, roughness: 0.8 });
   const shirt = new THREE.MeshStandardMaterial({ color: 0x2fd3c4, roughness: 0.9 });
   const pants = new THREE.MeshStandardMaterial({ color: 0x2a2e33, roughness: 0.9 });
-  const torso = new THREE.Mesh(new THREE.BoxGeometry(0.55, 0.7, 0.3), shirt);
-  torso.position.y = 1.15; torso.castShadow = true; g.add(torso);
-  const head = new THREE.Mesh(new THREE.BoxGeometry(0.34, 0.34, 0.32), skin);
-  head.position.y = 1.72; head.castShadow = true; g.add(head);
-  const legs = [];
+  const boots = new THREE.MeshStandardMaterial({ color: 0x17191c, roughness: 0.85 });
+  const hairMat = new THREE.MeshStandardMaterial({ color: 0xf5a623, roughness: 0.8 });
+  // Torso: a tapered cylinder — wide across the shoulders, narrow at the
+  // waist. Squashed along z (0.68) so the cross-section is a chest, not a
+  // tube, and the silhouette reads as a person instead of a crate.
+  const torso = new THREE.Mesh(new THREE.CylinderGeometry(0.285, 0.175, 0.60, 10, 1), shirt);
+  torso.scale.z = 0.68;
+  torso.position.y = 1.19; torso.castShadow = true; g.add(torso);
+  // Hips bridge the torso to the legs (dark trousers, same as the legs).
+  const hips = new THREE.Mesh(new THREE.CylinderGeometry(0.19, 0.165, 0.21, 8), pants);
+  hips.scale.z = 0.74; hips.position.y = 0.82; hips.castShadow = true; g.add(hips);
+  // Rounded deltoids soften the shoulder corners of the cylinder.
   for (const s of [-1, 1]) {
-    const leg = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.7, 0.22), pants);
-    leg.position.set(s * 0.14, 0.45, 0); leg.castShadow = true; g.add(leg); legs.push(leg);
+    const delt = new THREE.Mesh(new THREE.SphereGeometry(0.09, 8, 6), shirt);
+    delt.position.set(s * 0.205, 1.47, 0);
+    delt.scale.z = 0.82; delt.castShadow = true; g.add(delt);
   }
-  // Arms (pivot at the shoulder) + a cap, so the figure reads as a person.
-  const armGeo = new THREE.BoxGeometry(0.16, 0.62, 0.18);
-  armGeo.translate(0, -0.28, 0);
+  const neck = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.082, 0.11, 8), skin);
+  neck.position.y = 1.56; neck.castShadow = true; g.add(neck);
+  // Round head + an amber hair cap (the old boxy cap, now shaped to the skull
+  // so the player still pops out of the crowd at chase distance).
+  const head = new THREE.Mesh(new THREE.SphereGeometry(0.135, 12, 10), skin);
+  head.position.y = 1.745; head.scale.z = 0.92; head.castShadow = true; g.add(head);
+  const hair = new THREE.Mesh(
+    new THREE.SphereGeometry(0.142, 12, 8, 0, Math.PI * 2, 0, Math.PI * 0.58), hairMat);
+  hair.position.y = 1.747; hair.scale.z = 0.94; hair.castShadow = true; g.add(hair);
+  // Legs: hip pivot stays at y=0.45 (walk cycle rotates about it, unchanged);
+  // geometry now spans hip (0.90 m) down to the boot instead of being one box.
+  const legs = [];
+  const thighGeo = new THREE.CylinderGeometry(0.083, 0.072, 0.44, 8);
+  const shinGeo = new THREE.CylinderGeometry(0.066, 0.05, 0.40, 8);
+  const kneeGeo = new THREE.SphereGeometry(0.07, 8, 6);
+  const bootGeo = new THREE.BoxGeometry(0.135, 0.085, 0.26);
+  for (const s of [-1, 1]) {
+    const leg = new THREE.Group();
+    leg.position.set(s * 0.135, 0.45, 0);
+    const thigh = new THREE.Mesh(thighGeo, pants);
+    thigh.position.y = 0.21; thigh.castShadow = true; leg.add(thigh);
+    const knee = new THREE.Mesh(kneeGeo, pants);
+    knee.position.y = -0.015; leg.add(knee);
+    const shin = new THREE.Mesh(shinGeo, pants);
+    shin.position.y = -0.225; shin.castShadow = true; leg.add(shin);
+    const boot = new THREE.Mesh(bootGeo, boots);
+    boot.position.set(0, -0.405, 0.05); boot.castShadow = true; leg.add(boot);
+    g.add(leg); legs.push(leg);
+  }
+  // Arms: upper arm + forearm + hand. The shoulder pivot keeps its exact
+  // height/axis (y=1.45, z=0), so the walk swing and the aim pose
+  // (rotation.x / rotation.z) drive the limb identically — only the inboard
+  // offset is tightened to 0.235 so the figure stays inside the 0.6 m
+  // silhouette and the pistol sits nearer the aim line.
+  const upperGeo = new THREE.CylinderGeometry(0.062, 0.052, 0.30, 8);
+  const foreGeo = new THREE.CylinderGeometry(0.05, 0.042, 0.28, 8);
+  const handGeo = new THREE.BoxGeometry(0.085, 0.12, 0.095);
   const arms = [];
   for (const s of [-1, 1]) {
-    const arm = new THREE.Mesh(armGeo, shirt);
-    arm.position.set(s * 0.38, 1.45, 0); arm.castShadow = true; g.add(arm); arms.push(arm);
+    const arm = new THREE.Group();
+    arm.position.set(s * 0.235, 1.45, 0);
+    const upper = new THREE.Mesh(upperGeo, shirt);
+    upper.position.y = -0.15; upper.castShadow = true; arm.add(upper);
+    const elbow = new THREE.Mesh(kneeGeo, shirt);
+    elbow.position.y = -0.30; arm.add(elbow);
+    const fore = new THREE.Mesh(foreGeo, shirt);
+    fore.position.y = -0.45; fore.castShadow = true; arm.add(fore);
+    const hand = new THREE.Mesh(handGeo, skin);
+    hand.position.y = -0.595; hand.castShadow = true; arm.add(hand);
+    g.add(arm); arms.push(arm);
   }
   // Original low-poly pistol, built from plain boxes — no brand, no copied
   // asset. It hangs from the RIGHT arm (arms[0], local -x): the slide's long
@@ -73,9 +124,6 @@ export function buildPlayerMesh() {
   }));
   flashSprite.scale.set(0.85, 0.85, 1);
   flashSprite.position.copy(muzzle.position); gun.add(flashSprite);
-  const cap = new THREE.Mesh(new THREE.BoxGeometry(0.38, 0.12, 0.36),
-    new THREE.MeshStandardMaterial({ color: 0xf5a623, roughness: 0.8 }));
-  cap.position.y = 1.93; cap.castShadow = true; g.add(cap);
   return { group: g, legs, arms, gun, gunArm: arms[0], muzzle, flashSprite };
 }
 
