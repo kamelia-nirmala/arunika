@@ -38,32 +38,33 @@ export function stageShot(name, game) {
     const p = game.player;
     if (name === 'cover') {
       // Boulevard Kemuning Lurus, 11:40, chase cam behind Raka's sedan at
-      // 78 km/h, Sekarwangi bridge ahead. HUD STAYS VISIBLE: the judge
-      // scores HUD/minimap as a criterion, and the old shots hid it.
+      // 78 km/h, closing on Sekarwangi bridge — the 70 m pylon now dominates
+      // the frame. HUD STAYS VISIBLE: the judge scores HUD/minimap as a
+      // criterion, and the old shots hid it.
       p.mode = 'driving';
-      const car = placeCar(game, 'sedan', -45, 60, Math.PI, 21.7, 0x2a4d6e);
+      const car = placeCar(game, 'sedan', -45, -190, Math.PI, 21.7, 0x2a4d6e);
       p.car = car; p.pos.copy(car.pos); p.heading = Math.PI;
       game.wanted.heat = 45; game.wanted.stars = 2;
       game.missions.job = JOBS[3]; game.missions.obj = 0;
       // Traffic: 8 cars on the boulevard and side streets.
       for (let i = 0; i < 8; i++) {
         const x = [-45, 45, -135, 135][i % 4];
-        const z = -160 + i * 45;
+        const z = -410 + i * 45;
         placeCar(game, i % 3 === 0 ? 'truck' : 'sedan', x + (i % 2 ? 2 : -2), z,
           i % 2 ? 0 : Math.PI, 8 + rng() * 6);
       }
       // Pedestrians on the sidewalks.
-      for (let i = 0; i < 10; i++) spawnPed(game.peds, -45 + (rng() < 0.5 ? -9 : 9), -140 + i * 30);
+      for (let i = 0; i < 10; i++) spawnPed(game.peds, -45 + (rng() < 0.5 ? -9 : 9), -390 + i * 30);
       // Police cruiser in the opposite lane, lightbar flashing, closing in.
-      const cop = placeCar(game, 'police', -45 + 3.5, -40, 0, 12, 0x1a1a1a);
+      const cop = placeCar(game, 'police', -45 + 3.5, -290, 0, 12, 0x1a1a1a);
       addLightbar(cop);
       game.police.cars.push({ v: cop, stuck: 0 });
       // Helicopter upper left of the frame (staged position kept: forceHeli).
       game.police.forceHeli = true;
       game.police.heli.visible = true;
-      game.police.heli.position.set(-75, 16, -30);
+      game.police.heli.position.set(-75, 16, -280);
       game.camOverride = {
-        pos: { x: -45, y: 4.2, z: 44 }, look: { x: -45, y: 2.2, z: -50 }, fov: 58,
+        pos: { x: -45, y: 4.2, z: -174 }, look: { x: -47, y: 10, z: -300 }, fov: 58,
       };
     } else if (name === 'street') {
       // Pasar Ikan, 16:10, drizzle: shootout ON the z=-225 road looking
