@@ -65,10 +65,6 @@ export function quitToTitle(game) {
 // described as running out of breath, and a KO is never called an arrest.
 // A game that is already over keeps its first reason.
 export function gameOver(game, reason = 'ko') {
-  // Release the pointer lock first: while the canvas holds it the browser
-  // routes every click to the canvas, so #btn-restart (COBA LAGI) can never
-  // be clicked and the game cannot be restarted.
-  if (document.pointerLockElement) document.exitPointerLock();
   if (game.state === 'over') return;
   game.state = 'over';
   game.overReason = reason;
