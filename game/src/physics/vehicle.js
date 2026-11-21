@@ -7,151 +7,9 @@ import { clamp, lerp, smooth } from '../random.js';
 import { resolveCircle, circleHit } from './collision.js';
 import { groundHeight, onRoad } from '../world/roads.js';
 
-const wheelGeo = new THREE.CylinderGeometry(0.34, 0.34, 0.24, 12);
+const wheelGeo = new THREE.CylinderGeometry(0.34, 0.34, 0.24, 10);
 const tireMat = new THREE.MeshStandardMaterial({ color: 0x141414, roughness: 1 });
 const glassMat = new THREE.MeshStandardMaterial({ color: 0x1a2836, roughness: 0.2, metalness: 0.6 });
-// Shared materials: up to 45 cars are alive at once, so trim, lamps, plates and
-// rims each get exactly one material for the whole traffic fleet.
-const trimMat = new THREE.MeshStandardMaterial({ color: 0x1c1e22, roughness: 0.6, metalness: 0.3 });
-const rimMat = new THREE.MeshStandardMaterial({ color: 0xd5d9dd, roughness: 0.34, metalness: 0.4, emissive: 0x0c0d0e });
-const plateMat = new THREE.MeshStandardMaterial({ color: 0xdfe3d6, roughness: 0.5, metalness: 0.1, emissive: 0x121210 });
-const headMat = new THREE.MeshStandardMaterial({ color: 0xfff2c0, emissive: 0x554400 });
-const tailMat = new THREE.MeshStandardMaterial({ color: 0xaa1111, emissive: 0x330000 });
-const cargoMat = new THREE.MeshStandardMaterial({ color: 0x8a6f4a, roughness: 0.95 });
-
-// --- tiny geometry merger ---------------------------------------------------
-// Every detail box of one material is baked into a single BufferGeometry, so a
-// fully detailed car still costs only a handful of draw calls instead of ~20.
-const unitBox = new THREE.BoxGeometry(1, 1, 1);
-const _eul = new THREE.Euler();
-const _qt = new THREE.Quaternion();
-const _vp = new THREE.Vector3();
-const _vs = new THREE.Vector3();
-const _mx = new THREE.Matrix4();
-
-function part(geo, x, y, z, rx = 0, ry = 0, rz = 0, sx = 1, sy = 1, sz = 1) {
-  const out = geo.index ? geo.toNonIndexed() : geo.clone();
-  _eul.set(rx, ry, rz);
-  _qt.setFromEuler(_eul);
-  _vp.set(x, y, z); _vs.set(sx, sy, sz);
-  _mx.compose(_vp, _qt, _vs);
-  out.applyMatrix4(_mx);
-  return out;
-}
-function box(w, h, d, x, y, z, rx, ry, rz) {
-  return part(unitBox, x, y, z, rx, ry, rz, w, h, d);
-}
-function merge(geos) {
-  let n = 0;
-  for (const g of geos) n += g.attributes.position.array.length;
-  const p = new Float32Array(n), nn = new Float32Array(n);
-  let o = 0;
-  for (const g of geos) {
-    p.set(g.attributes.position.array, o);
-    nn.set(g.attributes.normal.array, o);
-    o += g.attributes.position.array.length;
-    g.dispose();
-  }
-  const out = new THREE.BufferGeometry();
-  out.setAttribute('position', new THREE.BufferAttribute(p, 3));
-  out.setAttribute('normal', new THREE.BufferAttribute(nn, 3));
-  return out;
-}
-
-// One alloy rim geometry shared by all four wheels of every car: hub disc +
-// five spokes + outer lip. The wheel spins, so the spokes turn with it.
-const rimGeo = (() => {
-  const parts = [];
-  const hub = new THREE.CylinderGeometry(0.095, 0.095, 0.075, 8);
-  parts.push(part(hub, 0, 0, 0, 0, 0, Math.PI / 2));
-  hub.dispose();
-  const lip = new THREE.TorusGeometry(0.20, 0.026, 4, 10);
-  parts.push(part(lip, 0, 0, 0, 0, Math.PI / 2, 0));
-  lip.dispose();
-  for (let i = 0; i < 5; i++) {
-    const spoke = new THREE.BoxGeometry(0.05, 0.20, 0.045);
-    parts.push(part(spoke, 0, 0.105, 0, (i / 5) * Math.PI * 2));
-    spoke.dispose();
-  }
-  return merge(parts);
-})();
-
-// Per-kind shared geometry: traffic reuses the same buffers for every car of
-// the same model (only the paint material is per-car).
-const carGeoCache = new Map();
-function carGeos(kind, spec) {
-  const hit = carGeoCache.get(kind);
-  if (hit) return hit;
-  const W = spec.wid, L = spec.len, hw = W / 2, hl = L / 2;
-  const truck = kind === 'truck';
-  // Cab sits forward on a truck (open bed behind); centred on a car.
-  const cabLen = truck ? L * 0.30 : L * 0.46;
-  const cabZ = truck ? L * 0.18 : -L * 0.05;
-  const cabW = W - 0.32;
-  const cabFront = cabZ + cabLen / 2, cabBack = cabZ - cabLen / 2;
-
-  // Painted shell: main box + hood bulge + roof panel (and the bed rails on a
-  // truck). One material => one merged mesh.
-  const paint = [box(W, 0.62, L, 0, 0.55, 0)];
-  // Hood bulge runs from the windscreen base to the nose, so the front of the
-  // car reads as bonnet + grille rather than a flat slab.
-  const hoodFront = hl - 0.07, hoodBack = cabFront, hoodLen = hoodFront - hoodBack;
-  paint.push(box(W * 0.86, 0.12, hoodLen, 0, 0.87, (hoodFront + hoodBack) / 2));
-  paint.push(box(cabW + 0.04, 0.09, cabLen * 0.95, 0, 1.335, cabZ));
-  let cargo = null;
-  if (truck) {
-    const bedFront = cabBack - 0.02, bedBack = -hl + 0.05;
-    const bedLen = bedFront - bedBack, bedZ = (bedFront + bedBack) / 2;
-    for (const s of [-1, 1]) paint.push(box(0.12, 0.36, bedLen, s * (hw - 0.06), 1.04, bedZ));
-    paint.push(box(W - 0.12, 0.36, 0.10, 0, 1.04, bedFront));
-    paint.push(box(W - 0.10, 0.32, 0.10, 0, 1.02, bedBack));
-    // Crates riding in the bed: the silhouette that says "truck", not "sedan".
-    cargo = merge([
-      box(W * 0.36, 0.50, bedLen * 0.42, -W * 0.16, 1.10, bedZ - bedLen * 0.08, 0, 0.05),
-      box(W * 0.30, 0.42, bedLen * 0.30, W * 0.20, 1.06, bedZ + bedLen * 0.18, 0, -0.07),
-    ]);
-  }
-
-  // Dark trim: bumpers, lip, grille, mirrors, skirts, door line + handle, pillars.
-  const trim = [
-    box(W * 0.54, 0.20, 0.05, 0, 0.605, hl + 0.005), // grille
-  ];
-  for (const s of [-1, 1]) {
-    trim.push(box(W + 0.06, 0.18, 0.28, 0, 0.42, s * (hl - 0.02)));          // bumper
-    trim.push(box(W * 0.90, 0.16, 0.14, 0, 0.26, s * (hl - 0.04)));          // valance
-    trim.push(box(0.16, 0.12, 0.22, s * (hw + 0.06), 1.02, truck ? cabFront - 0.12 : L * 0.18)); // mirror
-    trim.push(box(0.12, 0.16, L * 0.60, s * (hw - 0.02), 0.28, 0));          // side skirt
-    trim.push(box(0.02, 0.05, L * 0.26, s * (hw + 0.008), 0.70, cabZ));      // door line
-    trim.push(box(0.05, 0.05, 0.18, s * (hw + 0.015), 0.76, cabZ + cabLen * 0.16)); // handle
-    trim.push(box(0.06, 0.46, 0.08, s * (cabW / 2 - 0.02), 1.09, cabFront - 0.05, -0.18)); // A-pillar
-    trim.push(box(0.06, 0.42, 0.08, s * (cabW / 2 - 0.02), 1.08, cabBack + 0.05, 0.18));   // C-pillar
-  }
-
-  // Glasshouse: windscreen + rear screen + one side window per side, framed
-  // by the roof panel and the A/C pillars in the trim batch.
-  const glass = [
-    box(0.05, 0.46, cabLen * 0.88, -cabW / 2, 1.09, cabZ),
-    box(0.05, 0.46, cabLen * 0.88, cabW / 2, 1.09, cabZ),
-    box(cabW * 0.98, 0.46, 0.06, 0, 1.075, cabFront - 0.02, -0.18),
-    box(cabW * 0.94, 0.40, 0.06, 0, 1.065, cabBack + 0.02, 0.18),
-  ];
-
-  // Lamps + number plates (both sides of the car, one mesh each).
-  const head = [], tail = [], plate = [];
-  for (const s of [-1, 1]) {
-    head.push(box(0.30, 0.14, 0.06, s * (hw - 0.35), 0.62, hl));
-    tail.push(box(0.30, 0.14, 0.06, s * (hw - 0.35), 0.62, -hl));
-  }
-  plate.push(box(0.42, 0.12, 0.03, 0, 0.44, hl + 0.12));
-  plate.push(box(0.42, 0.12, 0.03, 0, 0.44, -(hl + 0.12)));
-
-  const out = {
-    paint: merge(paint), trim: merge(trim), glass: merge(glass),
-    head: merge(head), tail: merge(tail), plate: merge(plate), cargo,
-  };
-  carGeoCache.set(kind, out);
-  return out;
-}
 
 export function buildCarMesh(kind, color) {
   const spec = VEHICLES[kind];
@@ -160,33 +18,33 @@ export function buildCarMesh(kind, color) {
   // Clearcoat paint: the sun glints on the body instead of a flat matte.
   const paint = new THREE.MeshPhysicalMaterial({ color, roughness: 0.32, metalness: 0.55,
     clearcoat: 0.8, clearcoatRoughness: 0.15 });
-  const geo = carGeos(kind, spec);
-  const shell = new THREE.Mesh(geo.paint, paint);
-  shell.castShadow = true; body.add(shell);
-  const trim = new THREE.Mesh(geo.trim, trimMat);
-  trim.castShadow = true; body.add(trim);
-  const glass = new THREE.Mesh(geo.glass, glassMat);
-  glass.castShadow = true; body.add(glass);
-  body.add(new THREE.Mesh(geo.head, headMat), new THREE.Mesh(geo.tail, tailMat));
-  body.add(new THREE.Mesh(geo.plate, plateMat));
-  if (geo.cargo) {
-    const cargo = new THREE.Mesh(geo.cargo, cargoMat);
-    cargo.castShadow = true; body.add(cargo);
+  const lower = new THREE.Mesh(new THREE.BoxGeometry(spec.wid, 0.62, spec.len), paint);
+  lower.position.y = 0.55; lower.castShadow = true; body.add(lower);
+  const cabin = new THREE.Mesh(new THREE.BoxGeometry(spec.wid - 0.3, 0.55, spec.len * 0.45), glassMat);
+  cabin.position.set(0, 1.1, -spec.len * 0.05); cabin.castShadow = true; body.add(cabin);
+  // Bumpers + side mirrors, so the car reads as a car, not a box.
+  const trimMat = new THREE.MeshStandardMaterial({ color: 0x1c1e22, roughness: 0.6, metalness: 0.3 });
+  for (const s of [-1, 1]) {
+    const bumper = new THREE.Mesh(new THREE.BoxGeometry(spec.wid + 0.06, 0.18, 0.28), trimMat);
+    bumper.position.set(0, 0.42, s * (spec.len / 2 - 0.02)); body.add(bumper);
+    const mirror = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.12, 0.22), trimMat);
+    mirror.position.set(s * (spec.wid / 2 + 0.06), 1.02, spec.len * 0.18); body.add(mirror);
   }
-  // Wheels: dark tire + bright alloy rim on the outboard face. Front pair
-  // still steers through wheels[0]/[1].rotation.y and all four spin on .x.
+  // Headlights + taillights.
+  const hl = new THREE.MeshStandardMaterial({ color: 0xfff2c0, emissive: 0x554400 });
+  for (const s of [-1, 1]) {
+    const h = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.14, 0.06), hl);
+    h.position.set(s * (spec.wid / 2 - 0.35), 0.62, spec.len / 2); body.add(h);
+    const t = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.14, 0.06),
+      new THREE.MeshStandardMaterial({ color: 0xaa1111, emissive: 0x330000 }));
+    t.position.set(s * (spec.wid / 2 - 0.35), 0.62, -spec.len / 2); body.add(t);
+  }
   const wheels = [];
   for (const [sx, sz] of [[-1, 1], [1, 1], [-1, -1], [1, -1]]) {
-    const w = new THREE.Group();
-    // 'YXZ' so spin (x) happens inside steer (y) and the axle stays on the
-    // car's x axis while the front wheels are turned.
-    w.rotation.order = 'YXZ';
-    const tire = new THREE.Mesh(wheelGeo, tireMat);
-    tire.rotation.z = Math.PI / 2; tire.castShadow = true; w.add(tire);
-    const rim = new THREE.Mesh(rimGeo, rimMat);
-    rim.position.x = sx * 0.115; w.add(rim);
+    const w = new THREE.Mesh(wheelGeo, tireMat);
+    w.rotation.z = Math.PI / 2;
     w.position.set(sx * (spec.wid / 2 - 0.1), 0.34, sz * (spec.len / 2 - 0.7));
-    g.add(w); wheels.push(w);
+    w.castShadow = true; g.add(w); wheels.push(w);
   }
   g.add(body);
   // Soft contact shadow: grounds the car on the road without a shadow-map
