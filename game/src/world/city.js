@@ -14,237 +14,29 @@ function mat(color, opts = {}) {
   if (!matCache.has(key)) matCache.set(key, new THREE.MeshStandardMaterial({ color, ...opts }));
   return matCache.get(key);
 }
-// Facade texture: art-deco pastel render — cornice, deco pilasters, floor tint
-// shifts, windows in four states (lit, dark, curtained, barred) and a glazed
-// shopfront with a sign band and striped awning at street level. 256x256, one
-// canvas per district colour, cached by facadeMat().
+// Facade texture: pastel base, window grid, vertical art-deco lines, awning band.
 function facadeTexture(base, deco) {
-  const W = 256, H = 256;
-  const c = document.createElement('canvas'); c.width = W; c.height = H;
+  const c = document.createElement('canvas'); c.width = 128; c.height = 256;
   const g = c.getContext('2d');
-  const hex = (v) => '#' + (v >>> 0).toString(16).padStart(6, '0');
-  const mix = (a, b, t) => {
-    let out = 0;
-    for (const sh of [16, 8, 0]) {
-      const av = (a >> sh) & 255, bv = (b >> sh) & 255;
-      out |= (Math.round(av + (bv - av) * t) & 255) << sh;
-    }
-    return hex(out);
-  };
-  // Deterministic jitter seeded by the district colour, so a colour always
-  // paints the same wall and the seeded city stays reproducible.
-  let seed = (Math.imul(base >>> 0, 2654435761) ^ Math.imul(deco >>> 0, 40503)) >>> 0;
-  const rnd = () => { seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0; return seed / 4294967296; };
-  const ri = (n) => Math.floor(rnd() * n);
-  const glass = (x, y, w, h) => {
-    const grd = g.createLinearGradient(0, y, 0, y + h);
-    grd.addColorStop(0, '#6d8294'); grd.addColorStop(0.42, '#36454f'); grd.addColorStop(1, '#1f2731');
-    g.fillStyle = grd; g.fillRect(x, y, w, h);
-    g.fillStyle = 'rgba(214,235,241,0.20)'; g.fillRect(x, y, w, Math.max(2, Math.round(h * 0.2)));
-  };
-
-  g.fillStyle = hex(base); g.fillRect(0, 0, W, H);
-  // Plaster grain and a few faint weather streaks.
-  for (let i = 0; i < 300; i++) {
-    g.fillStyle = rnd() < 0.5
-      ? 'rgba(255,255,255,' + (0.02 + rnd() * 0.04).toFixed(3) + ')'
-      : 'rgba(38,40,44,' + (0.02 + rnd() * 0.04).toFixed(3) + ')';
-    g.fillRect(ri(W), ri(H), 1 + ri(3), 1 + ri(2));
-  }
-  for (let i = 0; i < 4; i++) {
-    g.fillStyle = 'rgba(74,74,66,' + (0.03 + rnd() * 0.025).toFixed(3) + ')';
-    g.fillRect(8 + ri(W - 40), 20 + ri(120), 8 + ri(16), 40 + ri(70));
-  }
-
-  // Floors: five bands between cornice and shopfront. Each band shifts a
-  // little from its neighbours but stays inside the pastel range.
-  const TOP = 16, SHOP = 186, FLOORS = 5;
-  const fh = (SHOP - TOP) / FLOORS; // 34 px per floor
-  for (let f = 0; f < FLOORS; f++) {
-    const fy = Math.round(TOP + f * fh);
-    const t = (rnd() - 0.5) * 0.14;
-    g.fillStyle = mix(base, t > 0 ? 0xffffff : 0x2c3038, Math.abs(t) + 0.02);
-    g.fillRect(0, fy, W, Math.round(fh));
-    g.fillStyle = 'rgba(52,50,46,0.14)'; g.fillRect(0, fy, W, 1); // slab shadow
-    g.fillStyle = 'rgba(255,255,255,0.14)'; g.fillRect(0, fy + 1, W, 1); // slab catch-light
-  }
-
-  // Art-deco pilasters between the window bays, plus corner piers.
-  const COLS = 6, WINW = 22, STEP = 32, GAP = STEP - WINW;
-  const X0 = Math.round((W - (COLS * WINW + (COLS - 1) * GAP)) / 2); // 37
-  g.fillStyle = mix(base, deco, 0.55);
-  for (let i = 0; i < COLS - 1; i++) g.fillRect(X0 + WINW + GAP / 2 - 1 + i * STEP, TOP, 3, SHOP - TOP);
-  g.fillRect(0, TOP, 6, SHOP - TOP); g.fillRect(W - 6, TOP, 6, SHOP - TOP);
-  g.fillStyle = 'rgba(48,46,42,0.10)';
-  for (let i = 0; i < COLS - 1; i++) g.fillRect(X0 + WINW + GAP / 2 + 2 + i * STEP, TOP, 1, SHOP - TOP);
-
-  for (let f = 0; f < FLOORS; f++) {
-    const wy = Math.round(TOP + f * fh) + 9, wh = 17;
-    for (let i = 0; i < COLS; i++) {
-      const wx = X0 + i * STEP;
-      const r = rnd();
-      // Frame: light surround, darker sill shadow (thin, but reads at distance).
-      g.fillStyle = mix(base, deco, 0.45); g.fillRect(wx - 2, wy - 3, WINW + 4, wh + 5);
-      if (r < 0.22) { // lit interior: warm lamp behind the glass
-        const grd = g.createLinearGradient(0, wy, 0, wy + wh);
-        grd.addColorStop(0, '#fff2cf'); grd.addColorStop(1, '#e9c78e');
-        g.fillStyle = grd; g.fillRect(wx, wy, WINW, wh);
-        g.fillStyle = 'rgba(255,255,255,0.35)'; g.fillRect(wx, wy, WINW, 2);
-      } else if (r < 0.48) { // dark glass with a pale sky reflection
-        glass(wx, wy, WINW, wh);
-      } else if (r < 0.68) { // curtained: muted pastel drapes with folds
-        g.fillStyle = mix(base, deco, 0.32); g.fillRect(wx, wy, WINW, wh);
-        g.fillStyle = 'rgba(58,56,50,0.16)';
-        for (let x = wx + 3; x < wx + WINW - 2; x += 6) g.fillRect(x, wy, 2, wh);
-        g.fillStyle = 'rgba(255,255,255,0.20)'; g.fillRect(wx, wy, WINW, 2);
-      } else if (r < 0.86) { // barred: dark glass behind a light grille
-        glass(wx, wy, WINW, wh);
-        g.fillStyle = 'rgba(208,204,192,0.80)';
-        for (let x = wx + 3; x < wx + WINW - 2; x += 5) g.fillRect(x, wy, 1, wh);
-        g.fillRect(wx, wy + Math.round(wh / 2), WINW, 1);
-      } else { // half-drawn blinds: lit top, dark bottom
-        g.fillStyle = '#3a4652'; g.fillRect(wx, wy, WINW, wh);
-        g.fillStyle = '#f4e2bb'; g.fillRect(wx, wy, WINW, Math.round(wh * 0.45));
-        g.fillStyle = 'rgba(30,32,36,0.25)'; g.fillRect(wx, wy + Math.round(wh * 0.45), WINW, 1);
-      }
-      // Mullion, sill and its shadow.
-      g.fillStyle = 'rgba(240,238,232,0.22)'; g.fillRect(wx + Math.round(WINW / 2), wy, 1, wh);
-      g.fillStyle = mix(base, deco, 0.6); g.fillRect(wx - 2, wy + wh + 2, WINW + 4, 2);
-      g.fillStyle = 'rgba(40,40,44,0.12)'; g.fillRect(wx - 2, wy + wh + 4, WINW + 4, 1);
-    }
-  }
-
-  // Cornice: light cap, shadow reveal, then a row of dentils.
-  g.fillStyle = mix(base, deco, 0.6); g.fillRect(0, 0, W, 9);
-  g.fillStyle = mix(base, 0x2c3038, 0.22); g.fillRect(0, 9, W, 2);
-  g.fillStyle = mix(base, deco, 0.32); g.fillRect(0, 11, W, 4);
-  g.fillStyle = 'rgba(38,38,42,0.12)'; g.fillRect(0, 15, W, 1);
-  g.fillStyle = 'rgba(255,255,255,0.20)';
-  for (let x = 3; x < W; x += 12) g.fillRect(x, 12, 5, 3);
-
-  // Shopfront: sign band, display glazing with an interior silhouette, door
-  // bay, then the striped awning that shelters the pavement.
-  g.fillStyle = mix(base, 0x3a352e, 0.12); g.fillRect(0, SHOP, W, H - SHOP);
-  g.fillStyle = 'rgba(255,255,255,0.16)'; g.fillRect(0, SHOP, W, 2);
-  const signCols = [0xc9785a, 0x5c9c92, 0xc9a25f, 0x8c82b4, 0x5c8db4];
-  const sign = signCols[ri(signCols.length)];
-  g.fillStyle = hex(sign); g.fillRect(6, SHOP + 4, W - 12, 18);
-  g.fillStyle = 'rgba(255,255,255,0.20)'; g.fillRect(6, SHOP + 4, W - 12, 2);
-  g.fillStyle = 'rgba(24,24,28,0.22)'; g.fillRect(6, SHOP + 20, W - 12, 2);
-  // Abstract shop lettering: pale blocks, no real text.
-  g.fillStyle = 'rgba(250,246,235,0.85)';
-  for (let lx = 14 + ri(10); lx < W - 26;) {
-    const lw = 4 + ri(8);
-    g.fillRect(lx, SHOP + 10, lw, 6);
-    lx += lw + 5 + ri(4);
-  }
-  const GY = SHOP + 26, GH = 26;
-  const gg = g.createLinearGradient(0, GY, 0, GY + GH);
-  gg.addColorStop(0, '#dfeef3'); gg.addColorStop(0.45, '#93a8b2'); gg.addColorStop(1, '#3c464f');
-  g.fillStyle = gg; g.fillRect(8, GY, W - 16, GH);
-  g.fillStyle = 'rgba(52,58,62,0.35)'; // shelves / bodies behind the glass
-  for (let x = 12; x < W - 16; x += 26) g.fillRect(x, GY + Math.round(GH * 0.45), 12 + ri(8), Math.round(GH * 0.5));
-  g.fillStyle = mix(base, deco, 0.5);
-  for (let x = 8; x <= W - 8; x += 30) g.fillRect(x, GY, 3, GH);
-  g.fillRect(8, GY + 12, W - 16, 2); // transom
-  const dxx = 8 + (2 + ri(3)) * 30; // door bay
-  g.fillStyle = '#2c333a'; g.fillRect(dxx + 2, GY, 26, GH);
-  g.fillStyle = 'rgba(240,236,226,0.70)'; g.fillRect(dxx + 2, GY, 26, 2);
-  g.fillStyle = 'rgba(240,236,226,0.55)'; g.fillRect(dxx + 13, GY + 10, 2, 6);
-  const aw = mix(sign, 0xffffff, 0.45);
-  for (let x = 4, i = 0; x < W - 4; x += 10, i++) {
-    g.fillStyle = i % 2 ? aw : '#f4efe4';
-    g.fillRect(x, H - 17, 10, 11);
-  }
-  g.fillStyle = 'rgba(255,255,255,0.25)'; g.fillRect(4, H - 17, W - 8, 1);
-  g.fillStyle = 'rgba(24,24,28,0.22)'; g.fillRect(4, H - 6, W - 8, 2);
-  g.fillStyle = mix(base, 0x2c3038, 0.35); g.fillRect(0, H - 4, W, 4);
-
+  g.fillStyle = '#' + base.toString(16).padStart(6, '0'); g.fillRect(0, 0, 128, 256);
+  g.fillStyle = '#' + deco.toString(16).padStart(6, '0');
+  for (let x = 8; x < 128; x += 16) g.fillRect(x, 0, 3, 256);
+  g.fillStyle = '#1c2733';
+  for (let y = 18; y < 230; y += 28) for (let x = 12; x < 116; x += 24) g.fillRect(x, y, 14, 18);
+  g.fillStyle = 'rgba(20,30,40,0.55)'; g.fillRect(0, 232, 128, 24); // awning band
   const t = new THREE.CanvasTexture(c);
   t.colorSpace = THREE.SRGBColorSpace;
   return t;
 }
-// Road texture: asphalt with grain, resurfacing patches and hairline cracks,
-// worn edge lines and the dashed yellow centre line. 128x256 over 12x24 m, so
-// the pixels stay square and the tile is reused by every road plane.
 function roadTexture() {
-  const W = 128, H = 256;
-  const c = document.createElement('canvas'); c.width = W; c.height = H;
+  const c = document.createElement('canvas'); c.width = 64; c.height = 256;
   const g = c.getContext('2d');
-  let seed = 0x5a17c0de;
-  const rnd = () => { seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0; return seed / 4294967296; };
-  const ri = (n) => Math.floor(rnd() * n);
-
-  g.fillStyle = '#2e3138'; g.fillRect(0, 0, W, H);
-  // Tyre-polished bands where the wheels actually run.
-  g.fillStyle = 'rgba(214,214,208,0.035)';
-  g.fillRect(16, 0, 18, H); g.fillRect(W - 34, 0, 18, H);
-  // Aggregate grain.
-  for (let i = 0; i < 1400; i++) {
-    g.fillStyle = rnd() < 0.55
-      ? 'rgba(226,226,216,' + (0.03 + rnd() * 0.05).toFixed(3) + ')'
-      : 'rgba(8,10,14,' + (0.05 + rnd() * 0.07).toFixed(3) + ')';
-    g.fillRect(ri(W), ri(H), 1 + ri(2), 1 + ri(2));
-  }
-  // Resurfacing patches: darker slabs with a tar seam and their own grain.
-  for (let i = 0; i < 3; i++) {
-    const px = 10 + ri(W - 60), py = ri(H - 50), pw = 26 + ri(38), ph = 20 + ri(34);
-    g.fillStyle = 'rgba(30,33,39,0.9)'; g.fillRect(px, py, pw, ph);
-    g.strokeStyle = 'rgba(18,20,24,0.55)'; g.lineWidth = 1;
-    g.strokeRect(px + 0.5, py + 0.5, pw, ph);
-    for (let k = 0; k < 60; k++) {
-      g.fillStyle = 'rgba(200,200,192,' + (0.03 + rnd() * 0.04).toFixed(3) + ')';
-      g.fillRect(px + ri(pw), py + ri(ph), 1, 1);
-    }
-  }
-  // Hairline cracks wandering down the tile.
-  g.strokeStyle = 'rgba(12,14,18,0.5)'; g.lineWidth = 1;
-  for (let i = 0; i < 5; i++) {
-    let x = ri(W), y = ri(H);
-    g.beginPath(); g.moveTo(x, y);
-    for (let k = 0; k < 9; k++) { x += (rnd() - 0.5) * 10; y += 5 + rnd() * 11; g.lineTo(x, y); }
-    g.stroke();
-  }
-  // Paint last, so lines stay readable over patches and cracks.
-  g.fillStyle = '#e8e4d8';
-  g.fillRect(7, 0, 3, H); g.fillRect(W - 10, 0, 3, H);
-  for (let i = 0; i < 10; i++) { // worn nicks in the edge lines
-    g.fillStyle = 'rgba(46,49,56,0.5)';
-    g.fillRect(rnd() < 0.5 ? 7 : W - 10, ri(H), 3, 2 + ri(4));
-  }
+  g.fillStyle = '#2e3138'; g.fillRect(0, 0, 64, 256);
+  g.fillStyle = '#e8e4d8'; g.fillRect(4, 0, 2, 256); g.fillRect(58, 0, 2, 256);
   g.fillStyle = '#f5c542';
-  for (let y = 0; y < H; y += 64) g.fillRect(W / 2 - 3, y, 6, 32);
+  for (let y = 0; y < 256; y += 64) g.fillRect(30, y, 4, 32);
   const t = new THREE.CanvasTexture(c);
   t.wrapS = t.wrapT = THREE.RepeatWrapping; t.colorSpace = THREE.SRGBColorSpace;
-  return t;
-}
-// Crossing decal: transparent paint overlay (zebra bars + lane arrow) applied
-// on the junction approaches, so the road's own asphalt and centre line show
-// through. 128x128, one texture reused by both crossing orientations.
-function roadTextureCrossing() {
-  const W = 128, H = 128;
-  const c = document.createElement('canvas'); c.width = W; c.height = H;
-  const g = c.getContext('2d');
-  let seed = 0x1c0ffee >>> 0;
-  const rnd = () => { seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0; return seed / 4294967296; };
-  const ri = (n) => Math.floor(rnd() * n);
-  g.clearRect(0, 0, W, H);
-  // Zebra bars across the carriageway, kept clear of the edge lines.
-  g.fillStyle = 'rgba(232,228,216,0.92)';
-  for (let y = 4; y < 54; y += 10) g.fillRect(8, y, W - 16, 6);
-  // Lane arrow, apex toward the crossing.
-  const ax = 32, ay = 64;
-  g.fillRect(ax - 4, ay + 22, 8, 42);
-  g.beginPath(); g.moveTo(ax, ay); g.lineTo(ax + 11, ay + 23); g.lineTo(ax - 11, ay + 23); g.closePath(); g.fill();
-  // Scuff the paint so the decal does not read as a sticker.
-  g.globalCompositeOperation = 'destination-out';
-  for (let i = 0; i < 70; i++) {
-    g.fillStyle = 'rgba(0,0,0,' + (0.25 + rnd() * 0.5).toFixed(2) + ')';
-    g.fillRect(ri(W), ri(H), 1 + ri(5), 1 + ri(3));
-  }
-  g.globalCompositeOperation = 'source-over';
-  const t = new THREE.CanvasTexture(c);
-  t.colorSpace = THREE.SRGBColorSpace;
   return t;
 }
 
