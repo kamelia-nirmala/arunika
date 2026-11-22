@@ -79,7 +79,10 @@ function spawnImpact(w, player, at) {
   scene.add(m);
   w.impacts.push({ m, life: 0.22, max: 0.22, peak: 0.95 });
 }
-// fire: aimDir is the camera forward (x, z normalized). Returns 'shot'|'dry'|'reload'|null.
+// fire: aimDir is the camera forward — ONE vector for the whole shot. Its
+// elevation is used for the tracer; the hit test folds it to the ground plane
+// (gangs stand on the street), which is the old behaviour. Returns
+// 'shot'|'dry'|'reload'|null.
 export function fire(w, player, aimDir, gangs, police, fx) {
   const spec = WEAPONS[w.current];
   if (w.reloading > 0 || w.lastShot > 0) return null;
@@ -87,13 +90,19 @@ export function fire(w, player, aimDir, gangs, police, fx) {
   w.lastShot = 1 / spec.rof;
   player.ammo[w.current]--;
   w.recoil = Math.min(1, w.recoil + 0.35);
-  // Hit: nearest gang within range and inside a narrow cone.
-  // The aim direction is the camera forward: renormalise its (x, z) part
-  // first. Without that, the camera's downward pitch shrinks the dot
-  // product (0.975 at the default pitch) below the 0.985 threshold, so a
-  // perfectly aimed shot could never hit anything.
-  const al = Math.hypot(aimDir.x, aimDir.z) || 1;
-  const ax = aimDir.x / al, az = aimDir.z / al;
+  // The single aim vector, normalised in 3D. Everything visible — barrel
+  // pose (controller solves the arm from this same vector), flash and tracer —
+  // is built from it, so there is only one direction in the shot.
+  const aim = new THREE.Vector3(aimDir.x, aimDir.y || 0, aimDir.z);
+  if (aim.lengthSq() < 1e-8) aim.set(0, 0, 1);
+  aim.normalize();
+  // Hit: nearest gang within range and inside a narrow cone. The hit test
+  // folds the aim to the ground plane and renormalises its (x, z) part:
+  // without that, the camera's downward pitch shrinks the dot product
+  // (0.975 at the default pitch) below the 0.985 threshold, so a perfectly
+  // aimed shot could never hit anything.
+  const al = Math.hypot(aim.x, aim.z) || 1;
+  const ax = aim.x / al, az = aim.z / al;
   let best = null, bd = spec.range;
   for (const g of gangs.list) {
     const dx = g.pos.x - player.pos.x, dz = g.pos.z - player.pos.z;
@@ -102,12 +111,16 @@ export function fire(w, player, aimDir, gangs, police, fx) {
     const dot = (dx * ax + dz * az) / (d || 1);
     if (dot > 0.985 && d < bd) { bd = d; best = g; }
   }
-  // Muzzle flash AT THE BARREL TIP, not the shoulder: the gun's muzzle
-  // anchor (child of the gun, child of the aiming arm) gives the true
-  // world position, so the flash follows the hand wherever it points.
+  // Muzzle flash AT THE BARREL TIP, not the shoulder: the gun's muzzle anchor
+  // (child of the gun, child of the aiming arm) gives the true world position.
+  // The ancestors are refreshed first: the arm's pose is solved earlier in
+  // this same step, and reading a matrix left over from the previous frame
+  // would put the flash where the barrel used to be.
   const mv = new THREE.Vector3();
-  if (player.mesh && player.mesh.muzzle) player.mesh.muzzle.getWorldPosition(mv);
-  else mv.set(player.pos.x + ax * 1.2, player.pos.y + 1.4, player.pos.z + az * 1.2);
+  if (player.mesh && player.mesh.muzzle) {
+    player.mesh.muzzle.updateWorldMatrix(true, false);
+    player.mesh.muzzle.getWorldPosition(mv);
+  } else mv.copy(player.pos).addScaledVector(aim, 1.2).setY(player.pos.y + 1.4);
   if (fx) fx(mv.x, mv.y, mv.z);
   // Recoil + visible flash on the gun itself (set here so the frame the
   // shot fires on already shows it; stepPlayer decays both afterwards).
@@ -118,11 +131,15 @@ export function fire(w, player, aimDir, gangs, police, fx) {
     player.mesh.flashSprite.scale.set(s, s, 1);
     player.mesh.flashSprite.material.opacity = 1;
   }
-  // Tracer from the barrel tip to the hit point (or max range on a miss),
-  // plus a spark where the shot lands.
-  const end = best
-    ? new THREE.Vector3(best.pos.x, best.pos.y + 1.2, best.pos.z)
-    : new THREE.Vector3(mv.x + ax * spec.range, mv.y - spec.range * 0.04, mv.z + az * spec.range);
+  // Tracer: from the barrel tip, ALONG THE AIM VECTOR, out to the target's
+  // range (or max range on a miss). Constructing the end point as
+  // muzzle + aim * d is what makes the line colinear with the aim instead of
+  // merely pointing near the target: it is the same vector the arm was posed
+  // from and the same one the hit cone used.
+  const dHit = best
+    ? (best.pos.x - mv.x) * aim.x + (best.pos.y + 1.2 - mv.y) * aim.y + (best.pos.z - mv.z) * aim.z
+    : spec.range;
+  const end = mv.clone().addScaledVector(aim, Math.max(dHit, 0.6));
   spawnTracer(w, player, mv, end);
   if (best) spawnImpact(w, player, end);
   if (best) {
