@@ -5,42 +5,115 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>ARUNIKA — Open-World Crime</title>
 <style>
+  /* HUD design tokens: one panel style (dark glass, 6 px radius, same shadow,
+     same condensed face) shared by every element, four accent colours only. */
+  :root {
+    --ink: #0e1a22; --cream: #ede6d6; --teal: #2fd3c4; --amber: #f5a623;
+    --red: #e0453a; --steel: #93a9b2;
+    --panel: rgba(10, 20, 28, 0.86); --edge: rgba(237, 230, 214, 0.20);
+    --shadow: 0 6px 16px rgba(0, 0, 0, 0.45);
+  }
   html, body { margin: 0; height: 100%; overflow: hidden; background: #0e1a22;
     font-family: "Arial Narrow", "Helvetica Neue Condensed", system-ui, sans-serif; }
   #game { position: fixed; inset: 0; width: 100%; height: 100%; display: block; touch-action: none; }
   #status { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
   #hud { position: fixed; inset: 0; pointer-events: none; color: #ede6d6; z-index: 5; }
-  .card { background: rgba(14,26,34,0.82); border: 1px solid rgba(47,211,196,0.5); border-radius: 6px; padding: 8px 12px; }
-  #obj-card { position: absolute; top: 14px; left: 14px; max-width: 340px; background: #ede6d6; color: #0e1a22; border-left: 6px solid #2fd3c4; }
-  #obj-title { font-weight: 800; letter-spacing: 2px; font-size: 15px; }
-  #obj-text { font-size: 14px; margin-top: 2px; }
-  #obj-dist { font-size: 12px; color: #5a6a72; margin-top: 2px; }
-  #wanted { position: absolute; top: 14px; right: 14px; text-align: right; display: flex; gap: 10px; align-items: flex-start; }
-  #stars { font-size: 26px; letter-spacing: 3px; color: #ede6d6; text-shadow: 0 0 6px #000; }
-  #tide-tube { width: 26px; height: 110px; border: 2px solid #ede6d6; border-radius: 13px; position: relative; overflow: hidden; background: rgba(14,26,34,0.6); }
-  #tide-fill { position: absolute; bottom: 0; left: 0; right: 0; height: 68%; background: linear-gradient(#2fd3c4, #1a5a8a); }
-  #tide-info { font-size: 12px; text-align: center; margin-top: 4px; }
-  #tide-pct { font-size: 18px; font-weight: 800; }
-  #minimap-wrap { position: absolute; left: 14px; bottom: 14px; }
-  #minimap-canvas { width: 190px; height: 190px; border-radius: 50%; border: 3px solid #ede6d6; background: #0e1a22; display: block; }
-  #speedo { position: absolute; right: 14px; bottom: 14px; text-align: right; }
-  #speed-num { font-size: 44px; font-weight: 800; line-height: 1; }
-  #speed-unit { font-size: 13px; letter-spacing: 2px; }
-  #speed-gear { font-size: 16px; color: #f5a623; }
-  #weapon-line { font-size: 14px; margin-top: 4px; letter-spacing: 1px; }
-  #vitals { position: absolute; left: 220px; bottom: 14px; width: 240px; }
-  .bar { height: 10px; background: rgba(14,26,34,0.7); border: 1px solid #ede6d6; border-radius: 5px; margin-top: 4px; overflow: hidden; }
-  #health-fill { height: 100%; width: 100%; background: #e0453a; }
-  #armor-fill { height: 100%; width: 0%; background: #2fd3c4; }
-  #vitals .row { display: flex; justify-content: space-between; font-size: 13px; margin-top: 6px; letter-spacing: 1px; }
-  #toast { position: absolute; top: 90px; left: 50%; transform: translateX(-50%); background: #f5a623; color: #0e1a22; font-weight: 800; letter-spacing: 1px; padding: 10px 22px; border-radius: 6px; opacity: 0; transition: opacity 0.3s; font-size: 16px; }
+  .card { background: var(--panel); border: 1px solid var(--edge); border-radius: 6px;
+    box-shadow: var(--shadow); }
+  .hide { display: none !important; }
+
+  /* ---- mission card: title, step counter, current objective, distance ---- */
+  #obj-card { position: absolute; top: 16px; left: 16px; width: 330px;
+    padding: 9px 14px 10px; border-left: 4px solid var(--teal); }
+  #obj-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+  #obj-title { font-size: 15px; font-weight: 800; letter-spacing: 1.6px; color: var(--cream);
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  #obj-step { flex: none; font-size: 12px; font-weight: 800; letter-spacing: 1px;
+    color: var(--ink); background: var(--teal); border-radius: 3px; padding: 1px 6px; }
+  #obj-text { font-size: 14px; margin-top: 6px; line-height: 1.3; color: var(--cream); }
+  #obj-foot { display: flex; justify-content: space-between; align-items: center;
+    gap: 10px; margin-top: 7px; }
+  #obj-dist { font-size: 13px; font-weight: 800; letter-spacing: 1.2px; color: var(--teal); }
+  #obj-next { flex: none; font-size: 11px; font-weight: 800; letter-spacing: 1.3px;
+    color: var(--ink); background: var(--amber); border-radius: 3px; padding: 2px 7px; }
+
+  /* ---- wanted stars + tide tube ---- */
+  #wanted { position: absolute; top: 16px; right: 16px; text-align: right;
+    display: flex; gap: 10px; align-items: flex-start; }
+  #wanted-label { font-size: 10px; font-weight: 800; letter-spacing: 2.4px; color: var(--steel); }
+  #stars { font-size: 28px; letter-spacing: 4px; color: #6d7a82;
+    text-shadow: 0 1px 3px #000; line-height: 1.05; }
+  #stars.hot { color: var(--red); text-shadow: 0 0 9px rgba(224, 69, 58, 0.7), 0 1px 2px #000; }
+  #tide-tube { width: 26px; height: 104px; border: 2px solid var(--edge); border-radius: 13px;
+    position: relative; overflow: hidden; background: rgba(10, 20, 28, 0.7); }
+  #tide-fill { position: absolute; bottom: 0; left: 0; right: 0; height: 68%;
+    background: linear-gradient(#2fd3c4, #1a5a8a); }
+  #tide-info { font-size: 11px; text-align: center; margin-top: 5px; letter-spacing: 1px; }
+  #tide-pct { font-size: 16px; font-weight: 800; }
+  #tide-label { color: var(--steel); font-weight: 800; letter-spacing: 1.4px; }
+
+  /* ---- minimap (bottom left, never covered) ---- */
+  #minimap-wrap { position: absolute; left: 16px; bottom: 16px; }
+  #minimap-canvas { width: 190px; height: 190px; border-radius: 50%; border: 3px solid #ede6d6;
+    background: #0e1a22; display: block; box-shadow: var(--shadow); }
+
+  /* ---- vitals: health, armor, money + clock (right of the minimap) ---- */
+  #vitals { position: absolute; left: 232px; bottom: 16px; width: 292px; padding: 8px 12px 9px; }
+  #vitals .vrow { display: flex; justify-content: space-between; font-size: 10px;
+    font-weight: 800; letter-spacing: 1.7px; color: var(--steel); margin-top: 4px; }
+  #vitals .vrow:first-child { margin-top: 0; }
+  #vitals .bar { height: 8px; margin-top: 2px; background: rgba(0, 0, 0, 0.5);
+    border: 1px solid rgba(237, 230, 214, 0.3); border-radius: 4px; overflow: hidden; }
+  #health-fill { height: 100%; width: 100%; background: var(--red); }
+  #armor-fill { height: 100%; width: 0%; background: var(--teal); }
+  #vitals-foot { display: flex; justify-content: space-between; margin-top: 7px;
+    font-size: 13px; font-weight: 800; letter-spacing: 1px; color: var(--cream); }
+
+  /* ---- bottom right cluster: equipment row above the speedometer ---- */
+  #status-cluster { position: absolute; right: 16px; bottom: 16px; width: 268px;
+    display: flex; flex-direction: column; gap: 8px; }
+  #equip { display: flex; align-items: center; justify-content: space-between;
+    gap: 4px; padding: 6px 10px; font-size: 12px; font-weight: 800; letter-spacing: 0.4px; }
+  #equip .eq { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  #equip .sep { color: var(--steel); font-weight: 400; }
+  #radio-name { color: var(--teal); max-width: 104px; }
+  #weapon-name { color: var(--cream); }
+  #ammo { color: var(--amber); flex: none; }
+  #speedo { padding: 5px 12px 9px; text-align: right; }
+  .sp-row { display: flex; align-items: baseline; justify-content: flex-end; gap: 6px; }
+  #speed-num { font-size: 40px; font-weight: 800; line-height: 1; color: var(--cream); }
+  #speed-unit { font-size: 11px; letter-spacing: 2px; color: var(--steel); font-weight: 800; }
+  #speed-gear { font-size: 13px; font-weight: 800; letter-spacing: 1px; color: var(--amber); }
+  #car-cond { display: flex; align-items: center; justify-content: flex-end; gap: 6px;
+    margin-top: 6px; font-size: 10px; font-weight: 800; letter-spacing: 1.5px; color: var(--steel); }
+  #car-cond .bar { width: 92px; height: 6px; background: rgba(0, 0, 0, 0.5);
+    border: 1px solid rgba(237, 230, 214, 0.3); border-radius: 3px; overflow: hidden; }
+  #car-fill { height: 100%; width: 100%; background: var(--amber); }
+
+  /* ---- centre notices ---- */
+  #toast { position: absolute; top: 84px; left: 50%; transform: translateX(-50%);
+    background: var(--amber); color: var(--ink); font-weight: 800; letter-spacing: 1px;
+    padding: 9px 22px; border-radius: 6px; box-shadow: var(--shadow);
+    opacity: 0; transition: opacity 0.3s; font-size: 16px; }
   #toast.show { opacity: 1; }
-  #enter-prompt { position: absolute; bottom: 210px; left: 50%; transform: translateX(-50%); background: rgba(14,26,34,0.88); border: 1px solid #2fd3c4; color: #ede6d6; font-weight: 800; letter-spacing: 2px; padding: 8px 18px; border-radius: 6px; opacity: 0; transition: opacity 0.2s; font-size: 15px; white-space: nowrap; }
+  #enter-prompt { position: absolute; top: 136px; left: 50%; transform: translateX(-50%);
+    background: var(--panel); border: 1px solid var(--teal); color: var(--cream);
+    font-weight: 800; letter-spacing: 2px; padding: 8px 18px; border-radius: 6px;
+    box-shadow: var(--shadow); opacity: 0; transition: opacity 0.2s; font-size: 15px;
+    white-space: nowrap; }
   #enter-prompt.show { opacity: 1; }
-  #fps { position: absolute; top: 14px; left: 50%; transform: translateX(-50%); font-size: 12px; opacity: 0.7; }
-  #dialog { position: absolute; left: 50%; bottom: 24px; transform: translateX(-50%); width: min(760px, 92vw); min-height: 170px; display: none; background: #0e1a22; border: 2px solid #2fd3c4; border-radius: 8px; padding: 10px; pointer-events: auto; cursor: pointer; }
+  /* The dialog card owns the bottom band: clear the prompt while it is open. */
+  #dialog.show ~ #enter-prompt { opacity: 0; }
+  #fps { position: absolute; top: 6px; left: 50%; transform: translateX(-50%);
+    font-size: 10px; opacity: 0.5; }
+
+  /* ---- dialog card: sits above the bottom HUD strip, never on top of it ---- */
+  #dialog { position: absolute; left: 50%; bottom: 108px; transform: translateX(-50%);
+    width: min(700px, 80vw); min-height: 168px; display: none; background: #0e1a22;
+    border: 2px solid #2fd3c4; border-radius: 8px; padding: 10px; pointer-events: auto;
+    cursor: pointer; box-shadow: 0 10px 26px rgba(0, 0, 0, 0.55); }
   #dialog.show { display: flex; gap: 12px; }
-  #dialog-portrait { width: 150px; height: 150px; flex: none; border-radius: 4px; }
+  #dialog-portrait { width: 148px; height: 148px; flex: none; border-radius: 4px; }
   #dialog-body { flex: 1; }
   #dialog-name { font-size: 20px; font-weight: 800; letter-spacing: 2px; }
   #dialog-role { font-size: 12px; color: #8fa8b0; letter-spacing: 1px; }
@@ -55,17 +128,18 @@
   .screen button { pointer-events: auto; cursor: pointer; background: #2fd3c4; color: #0e1a22; border: none; font-size: 18px; font-weight: 800; letter-spacing: 2px; padding: 12px 34px; border-radius: 6px; margin: 6px; }
   .screen button:hover { background: #f5a623; }
   .keys { font-size: 13px; color: #8fa8b0; margin-top: 18px; line-height: 1.8; }
-  body.hud-minimal #obj-card, body.hud-minimal #wanted, body.hud-minimal #minimap-wrap, body.hud-minimal #speedo, body.hud-minimal #vitals { display: none; }
+  body.hud-minimal #obj-card, body.hud-minimal #wanted, body.hud-minimal #minimap-wrap,
+  body.hud-minimal #status-cluster, body.hud-minimal #vitals { display: none; }
   body.hud-hidden #hud { display: none; }
-  @media (max-width: 700px) {
-    #obj-card { max-width: 200px; }
-    #obj-title { font-size: 12px; } #obj-text { font-size: 12px; }
-    #minimap-canvas { width: 120px; height: 120px; }
-    #vitals { left: 148px; width: 150px; }
+  @media (max-width: 900px) {
+    #obj-card { width: 240px; } #obj-title { font-size: 13px; } #obj-text { font-size: 12px; }
+    #minimap-canvas { width: 130px; height: 130px; }
+    #vitals { left: 158px; width: 210px; }
+    #status-cluster { width: 210px; }
     #speed-num { font-size: 30px; }
     #stars { font-size: 20px; } #tide-tube { height: 80px; }
+    #dialog { width: 92vw; bottom: 120px; } #dialog-text { font-size: 15px; }
     .screen h1 { font-size: 44px; letter-spacing: 8px; }
-    #dialog-text { font-size: 15px; }
   }
 </style>
 <script>
@@ -80,13 +154,42 @@ window.addEventListener('error', (e) => { window.__ARUNIKA_ERROR__ = String((e &
 <canvas id="game" aria-label="ARUNIKA: open-world crime in a tropical coastal city"></canvas>
 <p id="status" role="status" aria-live="polite"></p>
 <div id="hud">
-  <div id="obj-card"><div id="obj-title">ARUNIKA</div><div id="obj-text"></div><div id="obj-dist"></div></div>
-  <div id="wanted"><div><div id="stars">☆☆☆☆☆</div><div id="tide-info"><span id="tide-pct">68%</span> <span id="tide-arrow">▲</span><br><span id="tide-label">TENANG</span></div></div><div id="tide-tube"><div id="tide-fill"></div></div></div>
+  <div id="obj-card" class="card">
+    <div id="obj-head"><span id="obj-title">ARUNIKA</span><span id="obj-step">1/3</span></div>
+    <div id="obj-text"></div>
+    <div id="obj-foot"><span id="obj-dist"></span><span id="obj-next">TEKAN J</span></div>
+  </div>
+  <div id="wanted">
+    <div>
+      <div id="wanted-label">WANTED</div>
+      <div id="stars">☆☆☆☆☆</div>
+      <div id="tide-info"><span id="tide-pct">68%</span> <span id="tide-arrow">▲</span><br><span id="tide-label">TENANG</span></div>
+    </div>
+    <div id="tide-tube"><div id="tide-fill"></div></div>
+  </div>
   <div id="minimap-wrap"><canvas id="minimap-canvas" width="190" height="190"></canvas></div>
-  <div id="speedo"><div><span id="speed-num">0</span> <span id="speed-unit">KM/JAM</span></div><div id="speed-gear">—</div><div id="weapon-line"><span id="weapon-name">KOBRA-9</span> · <span id="ammo">13 / 60</span></div></div>
-  <div id="vitals"><div class="bar"><div id="health-fill"></div></div><div class="bar"><div id="armor-fill"></div></div><div class="row"><span id="money">Rp 0</span><span id="clock">11:40</span><span id="radio-name">OMBAK FM 88.4</span></div></div>
-  <div id="toast"></div><div id="enter-prompt">TEKAN E — MASUK MOBIL</div><div id="fps"></div>
+  <div id="vitals" class="card">
+    <div class="vrow"><span>NYAWA</span><span id="health-num">100</span></div>
+    <div class="bar"><div id="health-fill"></div></div>
+    <div class="vrow"><span>ARMOR</span><span id="armor-num">0</span></div>
+    <div class="bar"><div id="armor-fill"></div></div>
+    <div id="vitals-foot"><span id="money">Rp 0</span><span id="clock">11:40</span></div>
+  </div>
+  <div id="status-cluster">
+    <div id="equip" class="card">
+      <span class="eq" id="radio-name">OMBAK FM 88.4</span><span class="sep">·</span>
+      <span class="eq" id="weapon-name">KOBRA-9</span><span class="sep">·</span>
+      <span id="ammo">13 / 60</span>
+    </div>
+    <div id="speedo" class="card">
+      <div class="sp-row"><span id="speed-num">0</span><span id="speed-unit">KM/JAM</span><span id="speed-gear">1</span></div>
+      <div id="car-cond" class="hide"><span>KONDISI</span><span id="car-label">100%</span><span class="bar"><span id="car-fill"></span></span></div>
+    </div>
+  </div>
+  <div id="toast"></div>
   <div id="dialog"><canvas id="dialog-portrait" width="160" height="160"></canvas><div id="dialog-body"><div id="dialog-name"></div><div id="dialog-role"></div><div id="dialog-text"></div><div id="dialog-prompt"></div></div></div>
+  <div id="enter-prompt">TEKAN E — MASUK MOBIL</div>
+  <div id="fps"></div>
 </div>
 <div id="title-screen" class="screen show">
   <h1>ARUNIKA</h1>
