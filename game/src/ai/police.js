@@ -41,12 +41,16 @@ export function createPolice(scene) {
     arrested: false, arrestT: 0, nearestOfficer: Infinity };
 }
 // Lightbar: red + blue boxes on the roof (exported so a staged cruiser can get one too).
+// Each lens gets its own emissive material (NOT the shared cache) because the
+// flash below rewrites emissiveIntensity every frame; sharing one material
+// would make every cruiser on screen blink in lockstep with the same object.
+// The lenses are emissive only — still zero extra lights in the scene.
 export function addLightbar(v) {
   const barR = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.18, 0.3),
-    new THREE.MeshStandardMaterial({ color: 0xff2222, emissive: 0xff0000 }));
+    new THREE.MeshStandardMaterial({ color: 0xff2222, emissive: 0xff1505, emissiveIntensity: 0.25, roughness: 0.25 }));
   barR.position.set(-0.4, 1.45, 0);
   const barB = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.18, 0.3),
-    new THREE.MeshStandardMaterial({ color: 0x2222ff, emissive: 0x0000ff }));
+    new THREE.MeshStandardMaterial({ color: 0x2222ff, emissive: 0x1130ff, emissiveIntensity: 0.25, roughness: 0.25 }));
   barB.position.set(0.4, 1.45, 0);
   v.mesh.group.add(barR, barB);
   v.barR = barR; v.barB = barB;
@@ -162,10 +166,16 @@ export function updatePolice(pol, dt, player, stars, time) {
     if (stoppedForArrest) { inp.throttle = 0; inp.brake = true; }
     stepVehicle(v, inp, dt, 0.5);
     // Flash the lightbar (spawned units carry barR/barB; a staged cruiser may not).
+    // Rhythm: 5 beats a second, each beat a short hot strobe then a dark tail,
+    // and the lenses swap owner every beat — a clear red/blue alternation that
+    // still reads from across a boulevard. Arrest logic is untouched.
     if (v.barR && v.barB) {
-      const on = Math.floor(time * 6) % 2 === 0;
-      v.barR.material.emissiveIntensity = on ? 2 : 0.2;
-      v.barB.material.emissiveIntensity = on ? 0.2 : 2;
+      const ph = time * 5;
+      const on = Math.floor(ph) % 2 === 0;      // false → blue owns this beat
+      const strobe = (ph % 1) < 0.5 ? 1 : 0.18; // hot half, dim tail
+      const HOT = 4.2, DIM = 0.12;
+      v.barR.material.emissiveIntensity = on ? HOT * strobe : DIM;
+      v.barB.material.emissiveIntensity = on ? DIM : HOT * strobe;
     }
     // Deploy: car close to an on-foot player and slow (or already right on
     // top of them while braking hard) — officer steps out and chases.
