@@ -23,15 +23,61 @@ const DEPLOY_DIST = 22;
 const RECALL_DIST = 45;
 
 export function createPolice(scene) {
+  // --- Helicopter: built from box primitives, same blocky vernacular as the
+  // cars and pedestrians. Forward is -z (the tail boom runs out to +z), so the
+  // nose taper, cabin glazing and skids all sit on the -z half. The hull is
+  // matte dark on purpose: the cover shot hangs this against a pale golden-hour
+  // sky, and a mid-grey body measured ~no contrast there (a signboard, not an
+  // aircraft). Reference contract used by updatePolice below: `rotor` is the
+  // yaw-spinning main rotor group, `spot` is the searchlight with its target,
+  // `heli` is the whole group.
   const heliGeo = new THREE.Group();
-  const body = new THREE.Mesh(new THREE.BoxGeometry(2.4, 1.6, 7),
-    new THREE.MeshStandardMaterial({ color: 0x223344, roughness: 0.4, metalness: 0.5 }));
-  body.castShadow = true; heliGeo.add(body);
-  const rotor = new THREE.Mesh(new THREE.BoxGeometry(9, 0.1, 0.5),
-    new THREE.MeshStandardMaterial({ color: 0x111111 }));
-  rotor.position.y = 1.1; heliGeo.add(rotor);
+  const hullMat = new THREE.MeshStandardMaterial({ color: 0x1a2430, roughness: 0.88, metalness: 0.08 });
+  const darkMat = new THREE.MeshStandardMaterial({ color: 0x0a0e13, roughness: 0.9, metalness: 0.05 });
+  const glassMat = new THREE.MeshStandardMaterial({ color: 0x24435c, roughness: 0.35, metalness: 0.15 });
+  const addBox = (w, h, d, x, y, z, mat) => {
+    const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat);
+    m.position.set(x, y, z);
+    m.castShadow = true;
+    heliGeo.add(m);
+    return m;
+  };
+  // Fuselage: a broad cabin block plus a nose that steps down and narrows, so
+  // the front reads as a pointed cockpit rather than a slab end.
+  addBox(2.4, 1.6, 4.2, 0, 0, 0.9, hullMat);   // cabin/main body  z -1.2..3.0
+  addBox(2.1, 1.35, 1.2, 0, -0.05, -1.5, hullMat); // forward shoulder
+  addBox(1.6, 1.05, 1.0, 0, -0.15, -2.5, hullMat); // nose mid
+  addBox(1.0, 0.72, 0.8, 0, -0.25, -3.3, hullMat); // nose tip
+  addBox(0.42, 0.3, 0.35, 0, -0.34, -3.75, darkMat); // pitot/chine nub
+  // Cabin glazing: a dark blue band proud of the hull on both flanks, plus a
+  // raked windshield plate between the shoulder and the nose.
+  addBox(2.46, 0.62, 2.5, 0, 0.3, 0.1, glassMat);  // side windows band
+  addBox(1.55, 0.5, 0.2, 0, 0.42, -1.95, glassMat); // windshield
+  // Tail boom, fin, stabiliser, tail rotor.
+  const boom = addBox(0.5, 0.5, 4.6, 0, 0.18, 4.9, hullMat); boom.rotation.x = 0.03;
+  addBox(0.18, 1.5, 0.95, 0, 0.85, 7.0, hullMat);    // vertical fin
+  addBox(1.9, 0.12, 0.55, 0, 0.5, 6.2, darkMat);     // horizontal stabiliser
+  addBox(0.12, 1.15, 0.16, 0.34, 0.5, 7.15, darkMat); // tail rotor
+  addBox(0.3, 0.3, 0.3, 0.34, 0.5, 7.15, darkMat);   // tail rotor hub
+  // Rotor mast + 2-blade main rotor. `rotor` is a Group so updatePolice's
+  // `rotation.y += dt * 22` spins the blades, not just a plate.
+  addBox(0.3, 0.55, 0.3, 0, 1.0, 0.6, darkMat);      // mast
+  const rotor = new THREE.Group();
+  rotor.position.set(0, 1.32, 0.6);
+  const hub = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.26, 0.5), darkMat);
+  rotor.add(hub);
+  const bladeA = new THREE.Mesh(new THREE.BoxGeometry(9.4, 0.1, 0.55), darkMat);
+  const bladeB = new THREE.Mesh(new THREE.BoxGeometry(0.55, 0.1, 9.4), darkMat);
+  for (const b of [bladeA, bladeB]) { b.castShadow = true; rotor.add(b); }
+  heliGeo.add(rotor);
+  // Landing skids: two long rails on four struts.
+  for (const s of [-1, 1]) {
+    addBox(0.16, 0.16, 3.4, s * 1.0, -1.22, -0.1, darkMat);
+    addBox(0.12, 0.55, 0.12, s * 1.0, -0.95, -1.0, darkMat);
+    addBox(0.12, 0.55, 0.12, s * 1.0, -0.95, 0.9, darkMat);
+  }
   const spot = new THREE.SpotLight(0xfff2c0, 0, 60, 0.35, 0.4);
-  spot.position.set(0, -1, 0); heliGeo.add(spot);
+  spot.position.set(0, -0.9, -2.0); heliGeo.add(spot);
   heliGeo.add(spot.target);
   heliGeo.visible = false;
   scene.add(heliGeo);
@@ -46,6 +92,10 @@ export function createPolice(scene) {
 // would make every cruiser on screen blink in lockstep with the same object.
 // The lenses are emissive only — still zero extra lights in the scene.
 export function addLightbar(v) {
+  // Unmarked staging (createVehicle('police') straight from shots.js or a
+  // roadblock) still gets the livery: a cruiser with a bar and no markings
+  // reads as a black sedan, which is the fault this pass fixes. Idempotent.
+  addCruiserLivery(v);
   const barR = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.18, 0.3),
     new THREE.MeshStandardMaterial({ color: 0xff2222, emissive: 0xff1505, emissiveIntensity: 0.25, roughness: 0.25 }));
   barR.position.set(-0.4, 1.45, 0);
@@ -55,6 +105,60 @@ export function addLightbar(v) {
   v.mesh.group.add(barR, barB);
   v.barR = barR; v.barB = barB;
 }
+// Door livery: a white panel on each flank with "POLISI" painted on it.
+// Painted on canvas the same way world/props.js paints boardFace — no external
+// image, no extra light — and mounted on a 2 cm plate so the lettering stands
+// proud of the paint instead of z-fighting with it. Idempotent: a cruiser that
+// is staged, then reaches updatePolice unchanged, never gets two livery sets.
+function liveryPlateFace() {
+  // 256x72 canvas for a 1.10 x 0.31 m plate (3.55:1) — bold enough that the
+  // word still reads at the 12–20 m the street shot sits at.
+  const W = 256, H = 72;
+  const c = document.createElement('canvas'); c.width = W; c.height = H;
+  const g = c.getContext('2d');
+  g.fillStyle = '#f2f4f0'; g.fillRect(0, 0, W, H);
+  // Blue band along the bottom edge of the door, the way a marked unit carries
+  // its livery line; the amber tick at each end keeps it from reading as a
+  // blank white rectangle at a distance.
+  g.fillStyle = '#1c3f7a'; g.fillRect(0, H - 12, W, 12);
+  g.fillStyle = '#f5a623'; g.fillRect(0, H - 12, 10, 12); g.fillRect(W - 10, H - 12, 10, 12);
+  g.fillStyle = '#101c2c'; g.textAlign = 'center'; g.textBaseline = 'middle';
+  g.font = '900 44px Arial, Helvetica, sans-serif';
+  g.fillText('POLISI', W / 2, H / 2 - 5);
+  const t = new THREE.CanvasTexture(c);
+  t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = 16;
+  return t;
+}
+export function addCruiserLivery(v) {
+  if (v.liveryDone) return;
+  v.liveryDone = true;
+  const spec = v.spec;
+  const body = v.mesh.body;
+  const face = liveryPlateFace();
+  const plateMat = new THREE.MeshStandardMaterial({
+    map: face, roughness: 0.72, metalness: 0.05,
+    // Faint self-illumination: the door panel is the one bright thing on an
+    // otherwise black cruiser at golden hour, and a white panel in shadow
+    // alone came back as mid-grey.
+    emissive: 0x2a2c2a, emissiveIntensity: 0.55,
+  });
+  const whiteMat = new THREE.MeshStandardMaterial({ color: 0xf2f4f0, roughness: 0.6 });
+  // Door band: a white slab down the flank between the bumpers, sitting on the
+  // 0.86 m shoulder line, 90 cm high in z so it covers both doors of the sedan
+  // body. Sunk 1 cm into the paint so no daylight shows under it.
+  for (const s of [-1, 1]) {
+    const band = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.34, 2.0), whiteMat);
+    band.position.set(s * (spec.wid / 2 - 0.02), 0.66, -spec.len * 0.02);
+    body.add(band);
+    // Marking plate on the front door, 1.5 cm proud of the white band. Yaw
+    // ±90° puts the plate's own +x on the viewer's right from either flank, so
+    // the word reads left-to-right on both sides.
+    const plate = new THREE.Mesh(new THREE.PlaneGeometry(1.10, 0.31), plateMat);
+    plate.position.set(s * (spec.wid / 2 + 0.035), 0.66, spec.len * 0.06);
+    plate.rotation.y = s * Math.PI / 2;
+    body.add(plate);
+  }
+}
 // On-foot officer: navy uniform, cap, visible at a distance so the player
 // can see the arrest coming — same box-figure style as pedestrians.
 function buildOfficerMesh() {
@@ -63,6 +167,24 @@ function buildOfficerMesh() {
   const skin = new THREE.MeshStandardMaterial({ color: 0xc98d5f, roughness: 0.8 });
   const torso = new THREE.Mesh(new THREE.BoxGeometry(0.55, 0.7, 0.3), navy);
   torso.position.y = 1.15; torso.castShadow = true; g.add(torso);
+  // Contrast for a 1.8 m figure seen from 15-25 m at golden hour: a bright
+  // reflective vest band across the chest and a hi-vis stripe down each
+  // shoulder. Emissive-but-low, so the vest stays a pale lime rather than a
+  // lamp; the uniform underneath stays navy. These are the only two bright
+  // marks on the figure, which is what makes the silhouette read as police.
+  const hiVis = new THREE.MeshStandardMaterial({
+    color: 0xd9f24a, emissive: 0x8ea32a, emissiveIntensity: 0.5, roughness: 0.5,
+  });
+  const vest = new THREE.Mesh(new THREE.BoxGeometry(0.57, 0.20, 0.33), hiVis);
+  vest.position.y = 1.26; g.add(vest);
+  for (const s of [-1, 1]) {
+    const strap = new THREE.Mesh(new THREE.BoxGeometry(0.10, 0.62, 0.32), hiVis);
+    strap.position.set(s * 0.19, 1.17, 0); g.add(strap);
+  }
+  // Reflective silver line just under the vest, the second read at distance.
+  const flash = new THREE.Mesh(new THREE.BoxGeometry(0.575, 0.055, 0.335),
+    new THREE.MeshStandardMaterial({ color: 0xdfe6ea, emissive: 0x9fb0b8, emissiveIntensity: 0.9, roughness: 0.3 }));
+  flash.position.y = 1.09; g.add(flash);
   const belt = new THREE.Mesh(new THREE.BoxGeometry(0.57, 0.1, 0.32),
     new THREE.MeshStandardMaterial({ color: 0x0e1a22, roughness: 0.7 }));
   belt.position.y = 0.82; g.add(belt);
@@ -71,6 +193,17 @@ function buildOfficerMesh() {
   const cap = new THREE.Mesh(new THREE.BoxGeometry(0.38, 0.12, 0.36),
     new THREE.MeshStandardMaterial({ color: 0x0e1a22, roughness: 0.6 }));
   cap.position.y = 1.9; g.add(cap);
+  // Bright cap band: a pale rim round the crown, so the head separates from a
+  // dark backdrop and the cap reads as a uniform cap, not a black box.
+  const capBand = new THREE.Mesh(new THREE.BoxGeometry(0.40, 0.055, 0.38),
+    new THREE.MeshStandardMaterial({ color: 0xe8eef0, emissive: 0x8d9aa0, emissiveIntensity: 0.55, roughness: 0.45 }));
+  capBand.position.y = 1.945; g.add(capBand);
+  // Peaked visor on the front (-z is the figure's forward here: updatePolice
+  // sets rotation.y = atan2(dx, dz), so +z faces the target — a visor on the
+  // face side is +z).
+  const visor = new THREE.Mesh(new THREE.BoxGeometry(0.34, 0.045, 0.14),
+    new THREE.MeshStandardMaterial({ color: 0x080e14, roughness: 0.55 }));
+  visor.position.set(0, 1.855, 0.23); g.add(visor);
   const legs = [];
   for (const s of [-1, 1]) {
     const leg = new THREE.Mesh(new THREE.BoxGeometry(0.18, 0.65, 0.2), navy);
@@ -113,6 +246,7 @@ function spawnUnit(pol, player, stars) {
   const x = player.pos.x + Math.sin(a) * d, z = player.pos.z + Math.cos(a) * d;
   const v = createVehicle('police', x, z, 0, 0x1a1a1a);
   addLightbar(v);
+  addCruiserLivery(v);
   pol.scene.add(v.mesh.group);
   pol.cars.push({ v, stuck: 0, officers: [] });
 }
