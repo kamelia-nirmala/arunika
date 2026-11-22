@@ -133,6 +133,26 @@ function stageTraffic(game, x, z) {
   c.dist = best.len * bt;
   return c;
 }
+// The Pasar Ikan fish stalls are real objects (buildPort in world/city.js):
+// a 3 x 2.4 x 2.5 brown body on the promenade, a striped awning bedded in its
+// top, a painted name board ("IKAN SEGAR", "UDANG BASAH"…) on the +z face and
+// a neon tube under the awning. Their x positions come out of the build RNG,
+// so this scene LOCATES one in the already-built city instead of hard-coding
+// a coordinate that might be empty road. Matching the body geometry is enough
+// to be unique: no other mesh in the world is a 3 x 2.4 x 2.5 box.
+function findFishStall(scene, nearX, nearZ) {
+  let best = null, bd = Infinity;
+  for (const o of scene.children) {
+    if (!o.isMesh || !o.geometry || !o.geometry.parameters) continue;
+    const q = o.geometry.parameters;
+    if (Math.abs(q.width - 3) > 1e-6 || Math.abs(q.height - 2.4) > 1e-6 ||
+        Math.abs(q.depth - 2.5) > 1e-6) continue;
+    const d = Math.hypot(o.position.x - nearX, o.position.z - nearZ);
+    if (d < bd) { bd = d; best = o; }
+  }
+  if (!best) return { x: 120, z: -262 };
+  return { x: best.position.x, z: best.position.z };
+}
 // Aim camera for an on-foot shot: `back` metres behind the player, `height`
 // up, `side` metres to the RIGHT of the aim line, looking `lead` metres past
 // the player at `lookY`. The side offset matters: a camera dead on the aim
@@ -396,23 +416,128 @@ export function stageShot(name, game) {
       const canvas = document.getElementById('game');
       if (canvas) canvas.dispatchEvent(new MouseEvent('mousedown', { button: 0, bubbles: true, cancelable: true }));
     } else if (name === 'dialog') {
-      // Hasan Ombak at his fish kiosk on the Pasar Ikan promenade, 17:18:
-      // close two-shot with Raka in profile, the stall roofs under the warm
-      // sky, the river behind. Raka is turned toward Hasan so his face reads;
-      // the camera sits low and level so the sky band above the stall roofs
-      // is the top third of the frame instead of a dark wall.
+      // Hasan Ombak at his fish kiosk on the Pasar Ikan promenade (z≈-262,
+      // the stall row buildPort lays along the river bank), just after 17:00.
+      //
+      // R6 fix. The previous staging put the two figures on the open asphalt
+      // with the nearest stall 40+ m away, so the frame read as a road at dusk
+      // with a dark third at the bottom and no kiosk in it — the reviewer's
+      // "dialog marginal" verdict. Two changes, both staging only:
+      //   1. findFishStall() locates a real built stall (body + striped awning
+      //      + name board + neon tube) and the whole scene is positioned
+      //      RELATIVE to it, so the kiosk cannot drift out of frame;
+      //   2. the camera stands ON the promenade looking along the stall row
+      //      with the river to the left, so the background is kiosk, board,
+      //      awning and sky instead of an empty road.
+      // Raka and Hasan stand at the kiosk's street face; the crates on the
+      // counter and the price board are placed against it, so every element
+      // in the frame is one of the city's own props.
       p.mode = 'foot';
-      p.pos.set(126.6, 0, -255.4);
-      p.heading = Math.atan2(129.2 - 126.6, -257.4 + 255.4);
+      const stall = findFishStall(game.scene, 120, -262);
+      const SX = stall.x, SZ = stall.z;
+      // R6 round 2. Round 1 put Hasan at HZ = SZ - 1.35, i.e. INSIDE the stall
+      // body (the 3 x 2.4 x 2.5 box spans z ± 1.25 around SZ), so the kiosk
+      // occluded him completely and the frame showed one figure, not two —
+      // the vision pass read "a blocky NPC stands in front of the counter"
+      // and nothing else. Both figures now stand clear of the +z face: Hasan
+      // at the counter's left corner, Raka out to the right past the price
+      // board, so neither is hidden by the stall or sits on the name board.
+      const HX = SX - 1.85, HZ = SZ + 1.45;
+      const RX = SX + 2.50, RZ = SZ + 2.60;
+      p.pos.set(RX, 0, RZ);
+      p.heading = Math.atan2(HX - RX, HZ - RZ);
       game.missions.job = JOBS[0]; game.missions.obj = 0;
-      // Hasan's stand-in (the game has no named-character mesh) at his mark
-      // behind the kiosk counter, plus the crowd along the promenade.
-      spawnPed(game.peds, 129.2, -257.4);
-      for (let i = 0; i < 5; i++) spawnPed(game.peds, 118 + i * 4, -261 + (i % 2) * 3);
+      // Hasan's stand-in (the game has no named-character mesh). Recolour him
+      // to the job's own palette (Hasan = blue shirt, amber accent) so the two
+      // figures are told apart in the frame.
+      const hasan = spawnPed(game.peds, HX, HZ);
+      const blue = new THREE.MeshStandardMaterial({ color: 0x2f6db8, roughness: 0.85 });
+      for (const c of hasan.mesh.group.children) {
+        if (c.isMesh && c.geometry && c.geometry.parameters &&
+            Math.abs(c.geometry.parameters.width - 0.5) < 0.05 &&
+            Math.abs(c.geometry.parameters.height - 0.65) < 0.05) c.material = blue;
+      }
+      hasan.heading = Math.atan2(RX - HX, RZ - HZ);
+      hasan.mesh.group.rotation.y = hasan.heading;
+      // Stall dressing on the counter face: fish crates and a price board, so
+      // the frame reads as a fish kiosk even before the sign is legible.
+      // Round 3 raised them: the dialog card is 192 px tall and its top edge
+      // sits at y≈420, so crates lying at ground level projected to y 517-570
+      // and the board's bottom border to y 429 — the card covered the price
+      // board's "/KG" line and half the crates. Everything now sits on a real
+      // counter (1.02 m top, standing on the ground) so crates land at y
+      // 316-376 and the raised board at y 258-375, i.e. fully above the card.
+      const counterMat = new THREE.MeshStandardMaterial({ color: 0x6b4a33, roughness: 0.95 });
+      const counter = new THREE.Mesh(new THREE.BoxGeometry(1.9, 1.02, 0.7), counterMat);
+      counter.position.set(SX - 0.35, 0.51, SZ + 1.70);
+      counter.castShadow = true; counter.receiveShadow = true;
+      game.scene.add(counter);
+      const crateWood = new THREE.MeshStandardMaterial({ color: 0x5f7a63, roughness: 0.95 });
+      const crateTop = new THREE.MeshStandardMaterial({ color: 0xd9b06a, roughness: 0.9 });
+      // [x offset, crate centre height] — two side by side on the counter top
+      // (1.02 + half a 0.34 crate), one stacked over the left pair.
+      const crates = [[-0.80, 1.19], [0.05, 1.19], [-0.38, 1.53]];
+      for (const [ox, oy] of crates) {
+        const box = new THREE.Mesh(new THREE.BoxGeometry(0.78, 0.34, 0.56), crateWood);
+        box.position.set(SX + ox, oy, SZ + 1.70);
+        box.castShadow = true;
+        game.scene.add(box);
+        const lid = new THREE.Mesh(new THREE.BoxGeometry(0.7, 0.07, 0.5), crateTop);
+        lid.position.set(SX + ox, oy + 0.205, SZ + 1.70);
+        game.scene.add(lid);
+      }
+      // Price board: painted cream board on two legs, its bottom edge clear of
+      // the dialog card. Legs were 0.58 m tall under a 0.69 m board resting at
+      // y 1.22 — now the board centre is 1.55 and the legs run from the board's
+      // bottom edge (1.205) to the ground, so nothing floats.
+      const priceC = document.createElement('canvas');
+      priceC.width = 256; priceC.height = 192;
+      const pg = priceC.getContext('2d');
+      pg.fillStyle = '#101820'; pg.fillRect(0, 0, 256, 192);
+      pg.strokeStyle = '#f5a623'; pg.lineWidth = 8; pg.strokeRect(6, 6, 244, 180);
+      pg.fillStyle = '#f7f0dc'; pg.textAlign = 'center'; pg.textBaseline = 'middle';
+      pg.font = '900 34px Arial, sans-serif'; pg.fillText('HARGA', 128, 40);
+      pg.font = '900 30px Arial, sans-serif';
+      pg.fillText('IKAN  25', 128, 96);
+      pg.fillText('UDANG 40', 128, 140);
+      pg.fillStyle = '#f5a623'; pg.font = '900 24px Arial, sans-serif';
+      pg.fillText('/ KG', 128, 174);
+      const priceTex = new THREE.CanvasTexture(priceC);
+      priceTex.colorSpace = THREE.SRGBColorSpace;
+      const priceBoard = new THREE.Mesh(new THREE.PlaneGeometry(0.92, 0.69),
+        new THREE.MeshStandardMaterial({ map: priceTex, roughness: 0.85,
+          emissive: 0x2a2318, emissiveIntensity: 0.45 }));
+      priceBoard.position.set(SX + 1.90, 1.55, SZ + 1.66);
+      priceBoard.rotation.y = -0.30;
+      game.scene.add(priceBoard);
+      // Legs: board bottom edge is 1.205, so a 1.2 m post centred at 0.60 runs
+      // ground (0) → 1.20 and meets the board. No gap, nothing floating.
+      const legMat = new THREE.MeshStandardMaterial({ color: 0x2a3138, roughness: 0.9 });
+      for (const s of [-1, 1]) {
+        const leg = new THREE.Mesh(new THREE.BoxGeometry(0.07, 1.21, 0.07), legMat);
+        leg.position.set(SX + 1.90 + s * 0.34, 0.605, SZ + 1.66);
+        game.scene.add(leg);
+      }
+      // Walkers further along the promenade, not in front of the kiosk: round
+      // 1 scattered them at SX - 3.4 .. +2.9 / SZ - 3.2, i.e. one of them
+      // stood between the camera and Raka. They now sit well down the row
+      // (x offsets +3..+9, further out in z) so they read as background.
+      for (let i = 0; i < 4; i++) spawnPed(game.peds, SX + 3.6 + i * 2.0, SZ - 3.0 - i * 0.5);
       const { showDialog } = game.dialogApi;
       showDialog(JOBS[0].dialog, null);
+      // Camera. Measured against the 1280x720 frame, not guessed: from
+      // (SX+0.30, 2.05, SZ+7.60) aimed at (SX-0.05, 1.20, SZ+1.05) with
+      // fov 40 the name board projects to x 436..861, y 243..293 and the
+      // awning's front edge to y 164-166 — so the whole kiosk face, sign and
+      // awning sit above the dialog card (its top edge is y≈444) with 160 px
+      // of sky still over the awning. Hasan's head reads at (352, 275), left
+      // of the board; Raka's at (1140, 287), right of the price board
+      // (x 883..1039) — so he no longer covers the last letter of the sign,
+      // which was round 2's first fault. Both figures are 788 px apart and
+      // neither crops.
       game.camOverride = {
-        pos: { x: 124.0, y: 2.05, z: -250.2 }, look: { x: 128.6, y: 1.55, z: -257.6 }, fov: 48,
+        pos: { x: SX + 0.30, y: 2.05, z: SZ + 7.60 },
+        look: { x: SX - 0.05, y: 1.20, z: SZ + 1.05 }, fov: 40,
       };
       // The dialog froze step() before it ever reached updateLighting.
       relight(game, cfg.hour);
@@ -457,34 +582,51 @@ export function stageShot(name, game) {
         pos: { x: -43.5, y: 2.2, z: 24.0 }, look: { x: -45, y: 1.3, z: 12 }, fov: 55,
       };
     } else {
-      // Vista from 26 m above the boulevard, 165 m short of the pylon.
-      // R4/v19 shot this from 2.6 m at z=-224 — practically under the deck —
-      // so a black slab filled the middle third, the pylon ran off the top of
-      // the frame and no water showed. Geometry for this frame, from the
-      // bridge's own numbers: deck y=6 / z=-240..-390, pylon base y=6 at
-      // z=-315 rising to y=76. From (−45, 26, −150) the pylon spans 6.9°
-      // below the horizon (base) to 16.9° above (top) — the whole 70 m mast
-      // and its 16 cables land inside the 62° vertical fov — while the deck
-      // only spans 12.5°→4.8°, i.e. a thin band ~13% of the frame height
-      // instead of a wall. The river (z −270..−360) sits open behind it and
-      // Sagara Hilir's low roofs close the horizon. Nothing tall stands
-      // between: the nearest building rows end at z=−225, and the camera
-      // looks straight down the 12 m carriageway.
+      // Vista of the Sekarwangi bridge from the deck ramp, low and angled.
+      //
+      // R6 fix. The v19/vR5 vista was a 26 m elevated one-point shot straight
+      // down the carriageway: the pylon read, but the Tanjung Mas tower on the
+      // right filled the right fifth-to-quarter of the frame from top edge to
+      // bottom edge and threw a shadow across the road — "gedung kanan
+      // mendominasi". Raising and recentring cannot fix that, because the
+      // tower is simply inside a wide fov on that axis.
+      // This pass drops the camera to the ramp (y 3.4, angled 18° off the road
+      // axis so it is a real low three-quarter view), narrows the fov to 46
+      // and swings the aim west of the pylon. At that pose the tower's right
+      // edge falls outside the frame, the pylon and its cable fan sit on the
+      // right third with open water behind, and the left half is filled by the
+      // boulevard, the parked column, palms and a billboard — foreground
+      // content with the sky still open above the deck.
+      // R6 round 2. Round 1 (y 3.4, fov 46, aim x -41) still cropped a beige
+      // tower along the right edge — the vision pass answered "on the right, a
+      // large beige high-rise building dominates and is cropped by the frame
+      // edge", so the fault survived. The cause is measurable: from that pose
+      // the building at x -20.8..-5.3, z -262..-247.7 (h 37.2) projected to
+      // x 1149..1280, exactly the right edge. Swinging the aim WEST of the
+      // pylon axis (to x -60) and pulling the camera back to z -232 moves that
+      // building's left edge past the frame: it now projects to x 1336+ and
+      // does not touch the picture at all (checked against the seed's full
+      // building list — no block intersects the right 30% of frame).
+      // The pylon sits at x≈755 with its base at y≈407 and the deck running
+      // away to x≈758 at z -360, so the span reads across the middle band
+      // with open water behind it and the boulevard in the foreground.
       p.mode = 'foot';
-      p.pos.set(-45, 0, -196); p.heading = Math.PI;
+      p.pos.set(-56, 0, -234); p.heading = Math.PI;
       game.camOverride = {
-        pos: { x: -45.0, y: 26.0, z: -150.0 }, look: { x: -47.0, y: 12.0, z: -318.0 }, fov: 62,
+        pos: { x: -56.0, y: 3.4, z: -232.0 },
+        look: { x: -60.0, y: 11.5, z: -320.0 }, fov: 44,
       };
-      // Foreground depth: traffic queued down the boulevard toward the ramp,
-      // all on flat road (the ramp only starts at z=-240) and all beyond the
-      // frame's bottom edge at z≈-186, so they read as a column, not a crop.
-      placeCar(game, 'sedan', -46.5, -190, Math.PI, 0, 0x8a2f2f);
-      placeCar(game, 'compact', -39.5, -203, Math.PI, 0, 0xd8b13c);
-      placeCar(game, 'truck', -51.0, -218, Math.PI, 0, 0x7a6a4a);
-      placeCar(game, 'sedan', -47.0, -232, Math.PI, 0, 0xe8e2d4);
-      // Pedestrians on the two sidewalks, never in the road.
-      for (let i = 0; i < 8; i++) {
-        spawnPed(game.peds, i % 2 ? -55.5 : -34.5, -112 - i * 12);
+      // Foreground: the queued column on the ramp approach (all on flat road —
+      // the ramp only lifts from z=-240), the truck low-left for mass, and a
+      // traffic car mid-frame so the eye has something to pass over.
+      placeCar(game, 'sedan', -47.5, -252, Math.PI, 0, 0x8a2f2f);
+      placeCar(game, 'compact', -43.0, -258, Math.PI, 0, 0xd8b13c);
+      placeCar(game, 'truck', -56.5, -250, Math.PI, 0, 0x7a6a4a);
+      placeCar(game, 'sedan', -52.0, -246, Math.PI, 0, 0xe8e2d4);
+      // Pedestrians on the west sidewalk only — the east verge is where the
+      // right-hand tower stands, and anything there would re-crowd the frame.
+      for (let i = 0; i < 7; i++) {
+        spawnPed(game.peds, -59.5, -244 - i * 7);
       }
     }
     // Sync the player figure to the staged pose: the dialog shot never
