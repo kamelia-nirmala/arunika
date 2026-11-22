@@ -128,8 +128,22 @@ export function updateLighting(L, hour, rain, lampMats, focus) {
     // Facade materials (emissive-mapped windows) ride at a fraction of a lamp
     // head's strength so rooms read warm instead of glowing white.
     const scale = m.userData && m.userData.lampScale ? m.userData.lampScale : 1;
-    m.emissive.setHex(lampsOn ? 0xffc860 : 0x000000);
-    m.emissiveIntensity = lampsOn ? (night ? 1.4 : 3.0) * scale : 0;
+    // A material may declare a floor: the bridge deck's parapet lamps are on
+    // through the late afternoon (a real span switches them on before the
+    // streets do), so their heads keep a dim warm emissive until the 16:45
+    // switch takes them to full strength. Without this the deck's own lamps
+    // rendered as grey boxes on a dark slab in every golden-hour frame.
+    const floor = m.userData && m.userData.lampFloor;
+    if (lampsOn) {
+      m.emissive.setHex(0xffc860);
+      m.emissiveIntensity = (night ? 1.4 : 3.0) * scale;
+    } else if (floor) {
+      m.emissive.setHex(floor.color);
+      m.emissiveIntensity = floor.intensity * scale;
+    } else {
+      m.emissive.setHex(0x000000);
+      m.emissiveIntensity = 0;
+    }
   }
   return { night };
 }
