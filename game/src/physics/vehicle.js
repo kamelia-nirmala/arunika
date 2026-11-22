@@ -14,6 +14,16 @@ import { groundHeight, onRoad } from '../world/roads.js';
 
 const wheelGeo = new THREE.CylinderGeometry(0.34, 0.34, 0.24, 10);
 const tireMat = new THREE.MeshStandardMaterial({ color: 0x141414, roughness: 1 });
+// Detail boxes are shared between every car of a kind (a sedan's bonnet deck is
+// the same size on all of them), so the geometry cache keeps ~40 traffic cars
+// from each allocating a dozen one-off buffers.
+const boxCache = new Map();
+function boxOf(w, h, d) {
+  const k = w.toFixed(3) + '|' + h.toFixed(3) + '|' + d.toFixed(3);
+  let geo = boxCache.get(k);
+  if (!geo) { geo = new THREE.BoxGeometry(w, h, d); boxCache.set(k, geo); }
+  return geo;
+}
 // Rim disc: small, bright, one per wheel, parented to the wheel so it inherits
 // the existing spin and steering untouched.
 const rimGeo = new THREE.CylinderGeometry(0.21, 0.21, 0.035, 8);
@@ -21,25 +31,113 @@ const rimMat = new THREE.MeshStandardMaterial({ color: 0xb9bcc0, roughness: 0.35
 // Dark glass: low roughness + high metalness so the cabin reads as a coated
 // pane catching the sky, not as a second slab of paint.
 const glassMat = new THREE.MeshStandardMaterial({ color: 0x0d1822, roughness: 0.12, metalness: 0.88 });
+// Deeper glass for the inset side panes: they sit in shadow under the roof, so
+// they need their own, darker material to still read as glazing rather than as
+// a hole in the door.
+const glassDeepMat = new THREE.MeshStandardMaterial({ color: 0x080f16, roughness: 0.18, metalness: 0.7 });
+// Trim (bumpers, mirrors, grille surround) and the truck bed's rubber mat.
+const trimMat = new THREE.MeshStandardMaterial({ color: 0x1c1e22, roughness: 0.6, metalness: 0.3 });
+const chromeMat = new THREE.MeshStandardMaterial({ color: 0xc9ccd0, roughness: 0.25, metalness: 0.85 });
+const bedMat = new THREE.MeshStandardMaterial({ color: 0x2a2d31, roughness: 0.95 });
 
 export function buildCarMesh(kind, color) {
   const spec = VEHICLES[kind];
   const g = new THREE.Group();
   const body = new THREE.Group();
+  // A truck is not a long sedan: its cab is short and sits forward, leaving a
+  // real open bed behind it. That is the one place the silhouette differs by
+  // kind — wid/len still come straight from VEHICLES, so collision, wheel
+  // placement and ground clearance are untouched.
+  const isTruck = kind === 'truck';
+  const cabDepth = isTruck ? spec.len * 0.30 : spec.len * 0.45;
+  const cabZ = isTruck ? spec.len * 0.14 : -spec.len * 0.05;
   // Clearcoat paint: the sun glints on the body instead of a flat matte.
   const paint = new THREE.MeshPhysicalMaterial({ color, roughness: 0.32, metalness: 0.55,
     clearcoat: 0.8, clearcoatRoughness: 0.15 });
-  const lower = new THREE.Mesh(new THREE.BoxGeometry(spec.wid, 0.62, spec.len), paint);
+  const lower = new THREE.Mesh(boxOf(spec.wid, 0.62, spec.len), paint);
   lower.position.y = 0.55; lower.castShadow = true; body.add(lower);
-  const cabin = new THREE.Mesh(new THREE.BoxGeometry(spec.wid - 0.3, 0.55, spec.len * 0.45), glassMat);
-  cabin.position.set(0, 1.1, -spec.len * 0.05); cabin.castShadow = true; body.add(cabin);
-  // Bumpers + side mirrors, so the car reads as a car, not a box.
-  const trimMat = new THREE.MeshStandardMaterial({ color: 0x1c1e22, roughness: 0.6, metalness: 0.3 });
+  const cabin = new THREE.Mesh(boxOf(spec.wid - 0.3, 0.55, cabDepth), glassMat);
+  cabin.position.set(0, 1.1, cabZ); cabin.castShadow = true; body.add(cabin);
+  // --- Cabin, read as glazing in a body-coloured frame ---------------------
+  // The single glass block above stays as the window mass, so the car's outer
+  // silhouette is exactly what it was. What it lacked was a frame: a roof and
+  // four corner pillars of the same paint, so the dark block reads as windows
+  // between painted members instead of one dark cube. The roof cap's TOP is
+  // the old cabin top (1.375), so a lightbar still sits on the roof at the
+  // height police.js has always used.
+  const roof = new THREE.Mesh(boxOf(spec.wid - 0.24, 0.055, cabDepth + 0.02), paint);
+  roof.position.set(0, 1.3475, cabZ); roof.castShadow = true; body.add(roof);
+  // A and C pillars: full-width hoops at the cabin's front and rear edges.
+  // Thin (10 cm) so they read as posts, not as extra body volume.
+  for (const s of [1, -1]) {
+    const hoop = new THREE.Mesh(boxOf(spec.wid - 0.26, 0.51, 0.10), paint);
+    hoop.position.set(0, 1.095, cabZ + s * (cabDepth / 2 - 0.05));
+    hoop.castShadow = true; body.add(hoop);
+  }
+  // Beltline: the painted rail where glass meets door, closing the window box
+  // at the bottom so the sill is a bright line and not a shadow gap.
+  const belt = new THREE.Mesh(boxOf(spec.wid - 0.26, 0.095, cabDepth + 0.02), paint);
+  belt.position.set(0, 0.9075, cabZ); body.add(belt);
+  // Side glass: a pane set 1 cm behind the pillar faces on each flank, so the
+  // frame stands proud and the glass reads inset (the "windows are recessed"
+  // cue the flat block never gave). B-pillars split it into front/rear panes.
   for (const s of [-1, 1]) {
-    const bumper = new THREE.Mesh(new THREE.BoxGeometry(spec.wid + 0.06, 0.18, 0.28), trimMat);
+    const pane = new THREE.Mesh(boxOf(0.035, 0.365, cabDepth - 0.34), glassDeepMat);
+    pane.position.set(s * (spec.wid / 2 - 0.158), 1.1375, cabZ);
+    body.add(pane);
+    const bPillar = new THREE.Mesh(boxOf(0.045, 0.42, 0.10), paint);
+    bPillar.position.set(s * (spec.wid / 2 - 0.135), 1.11, cabZ - cabDepth * 0.04);
+    body.add(bPillar);
+  }
+  // --- Three volumes: low nose deck, tall cabin, low tail deck -------------
+  // Both decks sit 10 cm proud of the 0.86 m waist and stop well below the
+  // 1.375 m roof, so the profile steps nose → cabin → tail instead of running
+  // as one slab with a block on it.
+  const deckY = 0.91;
+  const noseZ0 = cabZ + cabDepth / 2, noseZ1 = spec.len / 2;
+  const nose = new THREE.Mesh(boxOf(spec.wid - (isTruck ? 0.34 : 0.20), 0.10, noseZ1 - noseZ0), paint);
+  nose.position.set(0, deckY, (noseZ0 + noseZ1) / 2); nose.castShadow = true; body.add(nose);
+  if (isTruck) {
+    // Open bed: a dark floor between two painted side walls, with a tailgate
+    // closing the back. The cabin's rear panel is the headboard, so nothing
+    // floats and the bed is empty the way a working truck's is.
+    const bedZ0 = -spec.len / 2, bedZ1 = cabZ - cabDepth / 2;
+    const bedLen = bedZ1 - bedZ0, bedMid = (bedZ0 + bedZ1) / 2;
+    const floor = new THREE.Mesh(boxOf(spec.wid - 0.10, 0.06, bedLen), bedMat);
+    floor.position.set(0, 0.89, bedMid); body.add(floor);
+    for (const s of [-1, 1]) {
+      const wall = new THREE.Mesh(boxOf(0.10, 0.42, bedLen), paint);
+      wall.position.set(s * (spec.wid / 2 - 0.05), 1.10, bedMid);
+      wall.castShadow = true; body.add(wall);
+    }
+    const gate = new THREE.Mesh(boxOf(spec.wid - 0.10, 0.42, 0.10), paint);
+    gate.position.set(0, 1.10, bedZ0 + 0.05); gate.castShadow = true; body.add(gate);
+  } else {
+    const tailZ0 = -spec.len / 2, tailZ1 = cabZ - cabDepth / 2;
+    const tail = new THREE.Mesh(boxOf(spec.wid - 0.20, 0.10, tailZ1 - tailZ0), paint);
+    tail.position.set(0, deckY, (tailZ0 + tailZ1) / 2); tail.castShadow = true; body.add(tail);
+  }
+  // --- Face: grille bar + logo --------------------------------------------
+  // A dark intake panel with two bright slats and a small badge, so the front
+  // reads as a face. Emissive-free: it is trim, not a lamp.
+  const grille = new THREE.Mesh(boxOf(spec.wid * (isTruck ? 0.62 : 0.52), isTruck ? 0.17 : 0.13, 0.06), trimMat);
+  grille.position.set(0, 0.72, spec.len / 2 - 0.01); body.add(grille);
+  for (const y of [0.695, 0.745]) {
+    const slat = new THREE.Mesh(boxOf(spec.wid * (isTruck ? 0.60 : 0.50), 0.022, 0.02), chromeMat);
+    slat.position.set(0, y, spec.len / 2 + 0.025); body.add(slat);
+  }
+  const badge = new THREE.Mesh(boxOf(0.10, 0.10, 0.03), chromeMat);
+  badge.position.set(0, 0.72, spec.len / 2 + 0.04); body.add(badge);
+  // Bumpers + side mirrors, so the car reads as a car, not a box.
+  for (const s of [-1, 1]) {
+    const bumper = new THREE.Mesh(boxOf(spec.wid + 0.06, 0.18, 0.28), trimMat);
     bumper.position.set(0, 0.42, s * (spec.len / 2 - 0.02)); body.add(bumper);
-    const mirror = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.12, 0.22), trimMat);
-    mirror.position.set(s * (spec.wid / 2 + 0.06), 1.02, spec.len * 0.18); body.add(mirror);
+    // Mirror on the door shoulder. The lower body's top is 0.86, so the old
+    // y=1.02 left the mirror hanging 10 cm above the paint with only a 2 cm
+    // corner overlap — an unsupported box. Now it beds 4 cm into the shoulder
+    // (y 0.82..0.94) and 5 cm into the door (x overlap), proud by 11 cm.
+    const mirror = new THREE.Mesh(boxOf(0.16, 0.12, 0.22), trimMat);
+    mirror.position.set(s * (spec.wid / 2 + 0.03), 0.88, spec.len * 0.18); body.add(mirror);
   }
   // Headlights + taillights. Emissive (no photometric lights): a warm cream
   // lens with a hot rim, and a red rear lens that also lifts on the brakes.
@@ -50,9 +148,9 @@ export function buildCarMesh(kind, color) {
     color: 0x9e1414, emissive: 0xd11a12, emissiveIntensity: 1.5, roughness: 0.4,
   });
   for (const s of [-1, 1]) {
-    const h = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.14, 0.06), hl);
+    const h = new THREE.Mesh(boxOf(0.3, 0.14, 0.06), hl);
     h.position.set(s * (spec.wid / 2 - 0.35), 0.62, spec.len / 2); body.add(h);
-    const t = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.14, 0.06), tl);
+    const t = new THREE.Mesh(boxOf(0.3, 0.14, 0.06), tl);
     t.position.set(s * (spec.wid / 2 - 0.35), 0.62, -spec.len / 2); body.add(t);
   }
   const wheels = [];
