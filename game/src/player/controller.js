@@ -7,6 +7,19 @@ import { resolveCircle, cameraBlockT } from '../physics/collision.js';
 import { createVehicle, stepVehicle, surfaceAt } from '../physics/vehicle.js';
 import { input } from '../input.js';
 
+// Scratch for the aim solve (no per-frame allocation). The gun arm hangs down
+// its own -Y, so the arm's rotation is the minimal quaternion that swings that
+// -Y onto the aim vector in the body's frame — no Euler order to get wrong.
+const _aimLocal = new THREE.Vector3();
+const _barrelAxis = new THREE.Vector3(0, -1, 0);
+const _upAxis = new THREE.Vector3(0, 1, 0);
+const _zAxis = new THREE.Vector3(0, 0, 1);
+const _qAim = new THREE.Quaternion();
+const _qRest = new THREE.Quaternion();
+const _qArm = new THREE.Quaternion();
+const _qSupport = new THREE.Quaternion();
+const _eulRest = new THREE.Euler();
+
 function flashTexture() {
   const c = document.createElement('canvas'); c.width = c.height = 64;
   const g = c.getContext('2d');
@@ -121,7 +134,12 @@ export function nearestCar(cars, x, z, maxD) {
 }
 // One update. cars: all drivable vehicles (player car included once driving).
 // world: {tide, traffic} — traffic cars are also in `cars` for collisions.
-export function stepPlayer(p, dt, cars, tide) {
+// `aim` is the ONE aim vector for the frame: the camera forward, the same
+// object main.js hands to fire(). The gun arm's pitch is solved from it (see
+// below), so the barrel, the muzzle flash and the tracer all sit on that one
+// line instead of on a fixed pose angle. It is optional so a caller without a
+// camera still works (the arm then keeps its old non-aiming pose).
+export function stepPlayer(p, dt, cars, tide, aim) {
   const fwdX = Math.sin(p.camYaw), fwdZ = Math.cos(p.camYaw);
   // Screen right = camera forward x up: (-cos(camYaw), +sin(camYaw)).
   // (The old (cos, -sin) was screen LEFT, which is why A/D were swapped.)
@@ -187,18 +205,53 @@ export function stepPlayer(p, dt, cars, tide) {
   // turn only applies while aiming — movement direction is untouched, so
   // the R2 A/D fix is not affected.
   const aiming = input.held('fire');
+  // Aiming: the BODY faces the aim vector's azimuth, and the arm is solved
+  // from the aim vector itself. The body used to turn to `camYaw` while the
+  // shot went along the camera forward — 7.2° apart in the street shot, which
+  // put the torso across the barrel and pushed the arm off the aim line before
+  // the pitch was even considered.
   if (aiming) {
     p.aimT = 0.3;
-    p.heading = angleLerp(p.heading, p.camYaw, clamp(dt * 12, 0, 1));
+    const yawAim = aim ? Math.atan2(aim.x, aim.z) : p.camYaw;
+    p.heading = angleLerp(p.heading, yawAim, clamp(dt * 12, 0, 1));
   } else p.aimT = Math.max(0, p.aimT - dt);
   const aimBlend = clamp(p.aimT / 0.18, 0, 1);
+  // The arm's pitch comes FROM the aim vector: the camera forward expressed in
+  // the body's frame, so pitch (and the small lateral component a side-offset
+  // camera produces) is whatever the shot actually uses. The old
+  // `-PI/2 + camPitch` was a pose angle tied to the camera's orbit elevation,
+  // not to where the camera points: measured 20.9° off the barrel line.
   const aimPitch = -Math.PI / 2 + p.camPitch;
   const swing = Math.sin(performance.now() * 0.012) * clamp(p.speed / 7.5, 0, 1) * 0.5;
   p.mesh.legs[0].rotation.x = swing; p.mesh.legs[1].rotation.x = -swing;
   const armR = p.mesh.arms[0], armL = p.mesh.arms[1];
-  armR.rotation.x = lerp(-swing, aimPitch + p.recoil * 0.12, aimBlend);
-  armL.rotation.x = lerp(swing, aimPitch + 0.22, aimBlend);
-  armL.rotation.z = lerp(0, -0.35, aimBlend); // support hand angles in to the gun
+  if (aim) {
+    // Body frame = the heading the figure is drawn with THIS frame. p.heading
+    // is used, not mesh.group.rotation.y: the group is turned to p.heading
+    // further down this function, so the matrix still holds last frame's yaw.
+    _aimLocal.set(aim.x, aim.y, aim.z).normalize()
+      .applyAxisAngle(_upAxis, -p.heading);
+    // Gun-arm pose: swing the arm's -Y onto the aim vector. The arm's -Y IS the
+    // barrel bore: the gun group is a pure translation inside the arm (no
+    // rotation of its own), so the pistol's slide axis and the arm axis are the
+    // same line. (Shoulder→muzzle is NOT that line — the muzzle sits 2 cm off
+    // the arm axis, which reads as a constant 1.1° if used as the metric.)
+    _qAim.setFromUnitVectors(_barrelAxis, _aimLocal);
+    // Rest pose (walking swing) as a quaternion, so the two blend as rotations.
+    _eulRest.set(-swing, 0, 0); _qRest.setFromEuler(_eulRest);
+    _qArm.copy(_qRest).slerp(_qAim, aimBlend);
+    armR.quaternion.copy(_qArm);
+    // Support arm: its rest pose swings OPPOSITE the gun arm (as before), and
+    // when aiming it takes the same aim rotation angled inward about its own z.
+    // It carries no shot, so it is allowed to leave the aim line.
+    _eulRest.set(swing, 0, 0); _qRest.setFromEuler(_eulRest);
+    _qSupport.setFromAxisAngle(_zAxis, -0.35);
+    _qArm.multiply(_qSupport);
+    armL.quaternion.copy(_qRest.slerp(_qArm, aimBlend));
+  } else {
+    armR.rotation.set(lerp(-swing, aimPitch, aimBlend), 0, 0);
+    armL.rotation.set(lerp(swing, aimPitch + 0.22, aimBlend), 0, lerp(0, -0.35, aimBlend));
+  }
   // Recoil kick on the gun itself (back along the barrel) + flash decay.
   p.recoil = Math.max(0, p.recoil - dt * 5);
   if (p.mesh.gun) p.mesh.gun.position.y = -0.58 + p.recoil * 0.06;
