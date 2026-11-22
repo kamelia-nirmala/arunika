@@ -71,6 +71,37 @@ function roadTexture() {
   return t;
 }
 
+// Deck paint: the same lane language roadTexture() paints on the boulevard —
+// but on a lighter tarmac base, because the deck only ever catches a grazing
+// sun and a #2e3138 slab read as a black plate from the ramp. Nothing here
+// emits light: it is the city's own paint, moved onto the span.
+// R7: the vista camera now sits 158 m out instead of 83 m, so a 5 px line on a
+// 128 px tile lands under a screen pixel once minification averages it. The
+// base is lifted a second step (#4a5058 -> #585f68, still a road grey, and
+// still reads darker than the white parapets) and the paint is drawn wider so
+// the edge lines and the yellow centre survive the mip chain at that range.
+function deckTexture() {
+  const c = document.createElement('canvas'); c.width = 128; c.height = 256;
+  const g = c.getContext('2d');
+  g.fillStyle = '#585f68'; g.fillRect(0, 0, 128, 256);
+  // Tarmac grain: sparse darker flecks so the slab is not a flat plate.
+  g.fillStyle = 'rgba(24,28,34,0.30)';
+  for (let i = 0; i < 260; i++) {
+    g.fillRect((i * 41) % 128, (i * 97) % 256, 1, 2);
+  }
+  // Edge lines: continuous white, inset 4 px, as wide as the boulevard's.
+  g.fillStyle = '#f2eee2'; g.fillRect(4, 0, 6, 256); g.fillRect(118, 0, 6, 256);
+  // Lane dividers: dashed white.
+  g.fillStyle = '#e6e0d0';
+  for (let y = 0; y < 256; y += 64) { g.fillRect(32, y, 5, 34); g.fillRect(91, y, 5, 34); }
+  // Centre: solid double yellow.
+  g.fillStyle = '#f5c94e'; g.fillRect(57, 0, 5, 256); g.fillRect(66, 0, 5, 256);
+  const t = new THREE.CanvasTexture(c);
+  t.wrapS = t.wrapT = THREE.RepeatWrapping; t.colorSpace = THREE.SRGBColorSpace;
+  t.anisotropy = 8;
+  return t;
+}
+
 // ---------------------------------------------------------------- signage
 // All names are generic Indonesian shop words and municipal slogans, drawn
 // with canvas text — no external images, no real brands.
@@ -595,28 +626,136 @@ export function buildCity(scene, rng) {
   }
 
   // Palms along the boulevard and scattered in blocks (instanced).
+  // R7: the crown is no longer a squashed icosahedron (a green blob). Each
+  // palm is a tapered, curving trunk with 8-9 drooping fronds fanned around
+  // its tip, all still instanced: one draw call for every trunk in the city
+  // and two for every frond (two droop variants), so 74 palms cost 3 draws
+  // and 3 shadow-batch entries — no lights, no extra shadow maps.
   const palmSpots = [];
   for (let z = -240; z <= 240; z += 30) { palmSpots.push([-45 - 10, z]); palmSpots.push([-45 + 10, z + 15]); }
   for (let i = 0; i < 40; i++) palmSpots.push([range(rng, -340, 340), range(rng, -260, 250)]);
-  const trunkGeo = new THREE.CylinderGeometry(0.22, 0.34, 7, 6);
-  const crownGeo = new THREE.IcosahedronGeometry(2.4, 0);
-  const trunks = new THREE.InstancedMesh(trunkGeo, mat(0x6b4a2a, { roughness: 1 }), palmSpots.length);
-  const crowns = new THREE.InstancedMesh(crownGeo, mat(0x2e7d46, { roughness: 1 }), palmSpots.length);
-  const m4 = new THREE.Matrix4(), q = new THREE.Quaternion(), s = new THREE.Vector3();
+  // Separate stream for the plant's own shape, so adding detail here cannot
+  // shift the build RNG that the bridge, port and factory downstream of this
+  // block are generated from (their layout must not move).
+  const prng = makeRng(0x5eed17);
+  // Trunk: swept tube, 8 sides, curved. Local space is built TIP-AT-ORIGIN
+  // (y 0 down to -1, base drifting `PALM_LEAN` in +x) so an instance placed at
+  // (x, h, z) puts the tip exactly at (x, h, z) and the base on the ground —
+  // the frond ring can then be attached to that same point with zero search.
+  const PALM_SIDES = 8, PALM_STATIONS = 7, PALM_LEAN = 0.62;
+  function palmTrunkGeometry() {
+    const pos = [], idx = [];
+    for (let i = 0; i < PALM_STATIONS; i++) {
+      const u = i / (PALM_STATIONS - 1);            // 0 = tip, 1 = base
+      const y = -u;
+      const cx = PALM_LEAN * Math.pow(u, 1.6);       // gentle, mostly upper bend
+      const r = (0.135 + 0.125 * u) * (1 + 0.05 * Math.sin(u * 7.0));
+      for (let k = 0; k < PALM_SIDES; k++) {
+        const a = (k / PALM_SIDES) * Math.PI * 2;
+        pos.push(cx + Math.cos(a) * r, y, Math.sin(a) * r);
+      }
+    }
+    for (let i = 0; i < PALM_STATIONS - 1; i++) {
+      for (let k = 0; k < PALM_SIDES; k++) {
+        const a = i * PALM_SIDES + k, b = i * PALM_SIDES + (k + 1) % PALM_SIDES;
+        idx.push(a, b, a + PALM_SIDES, b, b + PALM_SIDES, a + PALM_SIDES);
+      }
+    }
+    // Crown cap: a fan so the tip the fronds spring from is solid, not a hole.
+    const cap = pos.length / 3;
+    pos.push(0, 0, 0);
+    for (let k = 0; k < PALM_SIDES; k++) idx.push(cap, (k + 1) % PALM_SIDES, k);
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+    geo.setIndex(idx); geo.computeVertexNormals();
+    return geo;
+  }
+  // Frond: unit-length blade along +x. The profile rises off the crown then
+  // falls away (apex near the middle), so the tip really droops; the outline
+  // is scalloped leaflet-by-leaflet and the cross-section is folded into a
+  // steep V (rib low, edges up) — that is what stops it reading as a flat
+  // paddle. `droop` is how far the tip falls at a 1 m frond (×3 m length).
+  function palmFrondGeometry(droop) {
+    const NS = 15, pos = [], idx = [];
+    for (let i = 0; i < NS; i++) {
+      const s = i / (NS - 1);
+      // Apex around s 0.35, then a linear fall: an arc, not a straight ramp.
+      const y = 0.34 * s - droop * s * s;
+      // Sheath at the base, full blade past a third, needle point at the tip.
+      const base = Math.sin(Math.PI * Math.pow(0.06 + 0.94 * s, 0.62));
+      // Alternate long/short leaflets: the sawtooth silhouette of a pinnate frond.
+      const w = Math.max(0.022, 0.105 * base * (i % 2 ? 1.0 : 0.52));
+      const dip = Math.min(w * 0.9, 0.075);
+      pos.push(s, y - dip, -w, s, y, 0, s, y - dip, w);
+    }
+    for (let i = 0; i < NS - 1; i++) {
+      const o = i * 3, n = o + 3;
+      idx.push(o, o + 1, n, n, o + 1, n + 1);             // left half
+      idx.push(o + 1, o + 2, n + 1, n + 1, o + 2, n + 2);  // right half
+    }
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+    geo.setIndex(idx); geo.computeVertexNormals();
+    return geo;
+  }
+  const trunkGeo = palmTrunkGeometry();
+  const frondGeos = [palmFrondGeometry(0.55), palmFrondGeometry(0.95)];
+  const trunks = new THREE.InstancedMesh(trunkGeo,
+    // White base colour: instance colours multiply with it, so the per-palm
+    // brown shades must be the instance colour, not a second tint on top.
+    new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 1 }), palmSpots.length);
+  trunks.name = 'palmTrunks';
+  const m4 = new THREE.Matrix4(), q = new THREE.Quaternion(), qy = new THREE.Quaternion();
+  const qz = new THREE.Quaternion(), s = new THREE.Vector3(), v = new THREE.Vector3();
+  const tip = new THREE.Vector3(), tipLocalAxis = new THREE.Vector3(0, 0, 1);
+  const spinAxis = new THREE.Vector3(0, 1, 0);
+  const frondX = [], frondMat = [], frondCol = [], tips = [];
+  const col = new THREE.Color();
   palmSpots.forEach(([x, z], i) => {
-    const h = range(rng, 6, 9);
-    // Trunk only: the crown beds into the trunk's tip so the palm reads as one
-    // plant. The icosahedron's real half-height after the 0.45 squash is
-    // 0.92 m, so a centre at h+1.0 still left an 8 cm gap; h+0.85 sinks its
-    // lowest point 7 cm into the trunk top.
+    const h = range(rng, 6.5, 10.5);
+    // The trunk's tip is the instance position: the base lands on the ground
+    // and every frond springs from exactly this point.
     addOccluderCylinder(x, z, 0.4, 0, h + 0.5);
-    m4.compose(new THREE.Vector3(x, h / 2, z), q, new THREE.Vector3(1, h / 7, 1));
+    // Yaw about Y only — the trunk's lean is baked along +x, so a yaw turns
+    // the whole plant upright-in-place instead of tipping it over.
+    q.setFromAxisAngle(spinAxis, prng() * Math.PI * 2);
+    m4.compose(new THREE.Vector3(x, h, z), q, s.set(1, h, 1));
     trunks.setMatrixAt(i, m4);
-    m4.compose(new THREE.Vector3(x, h + 0.85, z), q, new THREE.Vector3(1, 0.45, 1));
-    crowns.setMatrixAt(i, m4);
+    trunks.setColorAt(i, col.setHex(0x6b4a2a).offsetHSL(0, 0, (prng() - 0.5) * 0.12));
+    tip.set(x, h, z);
+    tips.push({ x, y: h, z });
+    // 8-9 fronds around the tip, uneven in azimuth, pitch and length.
+    const nf = 8 + (prng() < 0.5 ? 1 : 0);
+    for (let f = 0; f < nf; f++) {
+      const az = (f / nf) * Math.PI * 2 + (prng() - 0.5) * 0.5;
+      const tilt = -0.28 + prng() * 0.85;         // down-swept to near-level
+      const len = 2.55 + prng() * 0.95;
+      qy.setFromAxisAngle(new THREE.Vector3(0, 1, 0), az);
+      qz.setFromAxisAngle(tipLocalAxis, tilt);
+      qy.multiply(qz);
+      // Root sits 8 cm inside the trunk top: no gap, no visible pivot.
+      v.set(0, -0.08, 0).applyQuaternion(qy).add(tip);
+      m4.compose(v, qy, s.set(len, len, len));
+      frondX.push(f & 1); frondMat.push(m4.clone());
+      frondCol.push(col.setHex(0x3a8a42).offsetHSL((prng() - 0.5) * 0.05,
+        0, (prng() - 0.5) * 0.20).getHex());
+    }
   });
-  trunks.castShadow = true; crowns.castShadow = true;
-  scene.add(trunks, crowns);
+  const perVar = [[], []];
+  frondMat.forEach((m, i) => perVar[frondX[i]].push([m, frondCol[i]]));
+  const frondMeshes = perVar.map((list, k) => {
+    const mesh = new THREE.InstancedMesh(frondGeos[k],
+      new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.85, side: THREE.DoubleSide }),
+      Math.max(1, list.length));
+    mesh.name = 'palmFronds' + (k ? 'B' : 'A');
+    list.forEach(([m, c], i) => { mesh.setMatrixAt(i, m); mesh.setColorAt(i, col.setHex(c)); });
+    mesh.count = list.length;
+    return mesh;
+  });
+  trunks.castShadow = true;
+  for (const f of frondMeshes) f.castShadow = true;
+  trunks.userData.tips = tips;
+  scene.add(trunks, ...frondMeshes);
   // Lamps along roads (instanced poles + heads; heads glow at night).
   const lampSpots = [];
   for (const x of VX) for (let z = -440; z <= 260; z += 45) lampSpots.push([x + 7, z]);
@@ -633,16 +772,14 @@ export function buildCity(scene, rng) {
   });
   scene.add(poles, heads);
   lamps.push(headMat);
-  buildBridge(scene, rng);
+  buildBridge(scene, rng, lamps);
   buildPort(scene, rng);
   buildFactory(scene, rng);
   return { lamps };
 }
 // Sekarwangi bridge: S-curve deck at y=6 over the river, approach ramps on
 // both banks, three concrete piers, one leaning pylon, fan of cables.
-function buildBridge(scene, rng) {
-  const deckMat = mat(0x3a3f46, { roughness: 0.9 });
-  const rampMat = mat(0x3a3f46, { roughness: 0.9, side: THREE.DoubleSide });
+function buildBridge(scene, rng, lamps) {
   const railMat = mat(0xf2ede2, { roughness: 0.5, side: THREE.DoubleSide });
   const concrete = mat(0x4a5058, { roughness: 1 });
   const white = mat(0xf2ede2, { roughness: 0.5 });
@@ -651,24 +788,51 @@ function buildBridge(scene, rng) {
   const DECK_TOP = CITY.bridgeY + DECK_H / 2; // 6.6 — surface the rails stand on
   const DECK_BOT = CITY.bridgeY - DECK_H / 2; // 5.4 — underside the piers meet
   const FOOT_S = -240, ABUT_S = -270, ABUT_N = -360, FOOT_N = -390;
+  // Deck surface: the boulevard's own lane paint, wrapped along the span.
+  // One tile is 26 m wide × 24 m long, matching how roadPlane repeats the
+  // 12 m road texture (len / 24), so dashes keep the city's spacing.
+  const deckTex = deckTexture();
+  deckTex.repeat.set(1, 1);
+  // R7: at the vista hour this span is lit only by a grazing sun, and its
+  // shadowed lanes on the far side of the pylon used to crush to black.
+  // Rather than move the sun (that would move the sky, which belongs to another
+  // module), the deck surface itself carries a faint self-lit floor: a dark
+  // blue-grey emissive, no glow, no light added to the scene, so the tarmac
+  // stays readable in its own shadow and the white edge lines and yellow
+  // centre keep their contrast. This still matters at R7/M3b's 17.35, because
+  // the deck lamps light the parapets, not the roadbed between them.
+  const deckMat = new THREE.MeshStandardMaterial({
+    map: deckTex, roughness: 0.78, metalness: 0.05,
+    emissive: 0x1e232c, emissiveIntensity: 1,
+  });
+  const rampMat = new THREE.MeshStandardMaterial({
+    map: deckTex, roughness: 0.88, side: THREE.DoubleSide,
+    emissive: 0x1e232c, emissiveIntensity: 1,
+  });
   // Deck centre line: the boulevard, bowing 8 m east at midspan.
   const curveX = (z) => CITY.bridgeX + 8 * Math.sin(((z + 240) / -150) * Math.PI);
   // A slab through a list of top-surface points {x, z, y}, extruded straight
   // down by `thickness`. The ramps and their parapets are both built from it.
-  function slab(pts, width, thickness, material) {
+  // `vScale` (metres per texture tile) also emits UVs, so a road-paint material
+  // can be laid straight onto the slab: u across the width, v along the path.
+  function slab(pts, width, thickness, material, vScale) {
     const half = width / 2;
-    const pos = [], idx = [];
+    const pos = [], idx = [], uv = [];
+    let run = 0;
     for (let i = 0; i < pts.length; i++) {
       const a = pts[Math.max(0, i - 1)], b = pts[Math.min(pts.length - 1, i + 1)];
       let tx = b.x - a.x, tz = b.z - a.z;
       const l = Math.hypot(tx, tz) || 1; tx /= l; tz /= l;
       const nx = -tz * half, nz = tx * half, p = pts[i];
+      if (i > 0) run += Math.hypot(p.x - pts[i - 1].x, p.z - pts[i - 1].z);
+      const v = vScale ? run / vScale : 0;
       pos.push(
         p.x + nx, p.y, p.z + nz, // top, left edge
         p.x - nx, p.y, p.z - nz, // top, right edge
         p.x + nx, p.y - thickness, p.z + nz, // bottom, left edge
         p.x - nx, p.y - thickness, p.z - nz, // bottom, right edge
       );
+      uv.push(0, v, 1, v, 0, v, 1, v);
     }
     const quad = (a, b, c, d) => idx.push(a, b, c, a, c, d);
     for (let i = 0; i < pts.length - 1; i++) {
@@ -683,6 +847,7 @@ function buildBridge(scene, rng) {
     quad(e, e + 2, e + 3, e + 1); // north cap
     const geo = new THREE.BufferGeometry();
     geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+    geo.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
     geo.setIndex(idx); geo.computeVertexNormals();
     const mesh = new THREE.Mesh(geo, material);
     mesh.castShadow = true; mesh.receiveShadow = true;
@@ -691,24 +856,44 @@ function buildBridge(scene, rng) {
   // Flat deck: only over the river, exactly where roads.js groundHeight()
   // holds y=6. (It used to run 30 m past each bank at y=6 with nothing under
   // it, so each end was a 5.4 m wall hanging over the boulevard.)
+  // Built as ONE slab through the S-curve rather than 12 chord boxes: the
+  // paint then runs continuously down the span (with the box version every
+  // segment restarted the texture and the dashes came out 4x too dense), and
+  // the seam overlaps are no longer needed. The deck joints that used to be
+  // implied by those box seams are drawn explicitly below as expansion strips,
+  // which is what a driver actually sees.
+  const deckPts = [];
   const segs = 12;
+  for (let i = 0; i <= segs; i++) {
+    const z = ABUT_S + ((ABUT_N - ABUT_S) * i) / segs;
+    deckPts.push({ x: curveX(z), z, y: DECK_TOP });
+  }
+  // Tuck each end 6 cm into its ramp head, so the two end faces are not
+  // coplanar with the ramp slab's cap.
+  deckPts[0].z -= 0.06; deckPts[segs].z += 0.06;
+  group.add(slab(deckPts, DECK_W, DECK_H, deckMat, 24));
+  // Deck joints: a dark steel expansion strip across the full 26 m at every
+  // section boundary, 1 cm proud of the surface so it catches the low sun.
+  const jointMat = mat(0x23272c, { roughness: 0.55, metalness: 0.35 });
+  for (let i = 1; i < segs; i++) {
+    const z = ABUT_S + ((ABUT_N - ABUT_S) * i) / segs;
+    const zN = z + 0.4;
+    const joint = new THREE.Mesh(new THREE.BoxGeometry(DECK_W, 0.08, 0.55), jointMat);
+    joint.position.set(curveX(z), DECK_TOP + 0.01, z);
+    joint.rotation.y = Math.atan2(curveX(zN) - curveX(z), 0.4);
+    group.add(joint);
+  }
   for (let i = 0; i < segs; i++) {
     const z0 = ABUT_S + ((ABUT_N - ABUT_S) * i) / segs;
     const z1 = ABUT_S + ((ABUT_N - ABUT_S) * (i + 1)) / segs;
     const x0 = curveX(z0), x1 = curveX(z1);
     const len = Math.hypot(x1 - x0, z1 - z0);
-    // +0.5 m overlap: adjacent chord boxes are rotated by slightly different
-    // angles, which left a hairline seam (a raycast at a joint hit the pier
-    // through it). Overlapping closes the seam without changing the outline.
-    const seg = new THREE.Mesh(new THREE.BoxGeometry(DECK_W, DECK_H, len + 0.5), deckMat);
-    seg.position.set((x0 + x1) / 2, CITY.bridgeY, (z0 + z1) / 2);
-    seg.rotation.y = Math.atan2(x1 - x0, z1 - z0);
-    seg.castShadow = true; seg.receiveShadow = true; group.add(seg);
+    const ry = Math.atan2(x1 - x0, z1 - z0);
     for (const side of [-13, 13]) {
       const rail = new THREE.Mesh(new THREE.BoxGeometry(0.3, 1.1, len), white);
-      rail.position.set((x0 + x1) / 2 + side * Math.cos(seg.rotation.y), 7.1,
-        (z0 + z1) / 2 - side * Math.sin(seg.rotation.y));
-      rail.rotation.y = seg.rotation.y; group.add(rail);
+      rail.position.set((x0 + x1) / 2 + side * Math.cos(ry), 7.1,
+        (z0 + z1) / 2 - side * Math.sin(ry));
+      rail.rotation.y = ry; group.add(rail);
     }
   }
   // Approach ramps: the top surface eases from the road up to the deck with
@@ -726,7 +911,9 @@ function buildBridge(scene, rng) {
     // Tuck the head 5 cm into the deck so the two end faces are not coplanar.
     const lean = Math.sign(abutZ - footZ) * 0.05;
     pts.push({ x: curveX(abutZ + lean), z: abutZ + lean, y: DECK_TOP });
-    group.add(slab(pts, DECK_W, DECK_H, rampMat));
+    // The ramp wears the same lane paint as the span, so the road, the climb
+    // and the bridge read as one continuous surface in a low sun.
+    group.add(slab(pts, DECK_W, DECK_H, rampMat, 24));
     for (const side of [-1, 1]) {
       const railPts = pts.map((p, i) => {
         const a = pts[Math.max(0, i - 1)], b = pts[Math.min(pts.length - 1, i + 1)];
@@ -750,6 +937,49 @@ function buildBridge(scene, rng) {
     pier.castShadow = true; pier.receiveShadow = true; group.add(pier);
     const cap = new THREE.Mesh(new THREE.BoxGeometry(7.6, 0.6, 5), concrete);
     cap.position.set(x, DECK_BOT - 0.3, z); group.add(cap);
+  }
+  // Deck lighting. The boulevard's lamps never reach the span: lampSpots only
+  // walk the roads, so the 90 m between the abutments had no lit heads at all
+  // and the deck read as a black plate in every golden-hour frame. These are
+  // the SAME fixture the city already uses — a 6 m pole with a head that
+  // lighting.js switches on at 16:45 — placed along both parapets, and their
+  // head material is registered in `lamps` so nothing about the light budget
+  // changes: no new PointLight, no new shadow map, just emissive heads.
+  // R7: this material used to leave the heads unlit until lighting.js struck
+  // them up, which meant the span read as a grey plate before dusk. The head
+  // now carries a standing warm emissive — it is a lamp head, so a lit filament
+  // is what the eye expects — and lighting.js still owns the dusk value: its
+  // per-frame write replaces both emissive and intensity from 16:45 on, so play
+  // at night is unchanged.
+  const deckLampPole = new THREE.CylinderGeometry(0.09, 0.12, 5.2, 5);
+  const deckLampHead = new THREE.BoxGeometry(0.66, 0.24, 0.4);
+  const deckLampMat = new THREE.MeshStandardMaterial({
+    color: 0xd8d2c0, emissive: 0xffc060, emissiveIntensity: 1.1,
+  });
+  // Registered floor: dim warm filament from build time until 16:45, then
+  // lighting.js takes over at full lamp strength (see render/lighting.js).
+  deckLampMat.userData.lampFloor = { color: 0xffc060, intensity: 1.1 };
+  const deckPoleMat = mat(0x2a2e33, { roughness: 0.6, metalness: 0.4 });
+  lamps.push(deckLampMat);
+  // 8 stations × 2 sides = 16 heads, 9.6 m apart along the span, set 12.6 m
+  // off the centre line so they sit on the parapet, not in a lane. The walk
+  // runs NORTH from the south abutment, i.e. z decreases (ABUT_S = -270 is
+  // the south end, ABUT_N = -360 the north).
+  for (let i = 0; i < 8; i++) {
+    const z = ABUT_S - 6 - i * 9.6;
+    if (z < ABUT_N + 2) break;
+    const zN = z - 0.5;
+    const ry = Math.atan2(curveX(zN) - curveX(z), -0.5);
+    for (const side of [-12.6, 12.6]) {
+      const px = curveX(z) + side * Math.cos(ry);
+      const pz = z - side * Math.sin(ry);
+      const pole = new THREE.Mesh(deckLampPole, deckPoleMat);
+      pole.position.set(px, DECK_TOP + 2.6, pz); // base on the deck surface
+      group.add(pole);
+      const head = new THREE.Mesh(deckLampHead, deckLampMat);
+      head.position.set(px, DECK_TOP + 5.2, pz); // meets the pole's top
+      group.add(head);
+    }
   }
   // Single asymmetric pylon, leaning like a sail, 70 m tall.
   const PYLON_X = CITY.bridgeX - 4, PYLON_Z = -315, LEAN = 0.12;
