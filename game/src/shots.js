@@ -11,6 +11,7 @@ import { setTide } from './systems/tide.js';
 import { makeRng } from './random.js';
 import { switchWeapon } from './player/weapons.js';
 import { spawnTrafficCar } from './world/traffic.js';
+import { buildAwning } from './world/props.js';
 import { updateLighting } from './render/lighting.js';
 
 // Golden hour = 16.6–17.8 (sun low and warm in lighting.js); dusk vista just
@@ -23,14 +24,24 @@ import { updateLighting } from './render/lighting.js';
 // the warm dusk colour by then, so the sky is the warm mauve the dialog shot
 // was praised for, and the sun (0xffc890) is low enough to rim the towers.
 // That low sun is also why cover adds its own warm fill lights in staging —
-// see the note there. Vista drops to 16.0 so its wide sky stays a
-// pale blue (179,195,200) behind the white pylon instead of drifting mauve.
+// see the note there. Vista sat at 16.0 for six rounds so its wide sky stayed
+// a pale blue behind the white pylon instead of drifting mauve; R7/M3b measured
+// that choice against the other three frames and moved it (see the note there).
+// R7/M4 — all four judge shots sit on the same wanted level so the HUD reads
+// identically. ★3 is the value: updatePolice wants stars + 1 units (four),
+// cover stages four pursuers plus a roadblock and street stages four
+// cruisers, so neither scene needs a spawn. `heat` 82 sits between the ★3
+// (70) and ★4 (110) thresholds in config.js, i.e. it re-derives ★3 on every
+// updateWanted pass. Street still needs the re-assert in main.js: firing the
+// SMG adds 10 heat a shot, which on its own would carry the frame to ★4.
+// minimap keeps its own ★3 independently — it is a candidate shot, not a
+// judge shot.
 const SHOTS = {
-  cover: { hour: 17.35, tide: 0.62, rain: 0, steps: 90 },
-  street: { hour: 16.95, tide: 0.5, rain: 0, steps: 31 },
-  dialog: { hour: 17.3, tide: 0.55, rain: 0, steps: 12 },
+  cover: { hour: 17.35, tide: 0.62, rain: 0, steps: 90, wanted: 3, heat: 82 },
+  street: { hour: 16.95, tide: 0.5, rain: 0, steps: 31, wanted: 3, heat: 82 },
+  dialog: { hour: 17.3, tide: 0.55, rain: 0, steps: 12, wanted: 3, heat: 82 },
   minimap: { hour: 16.9, tide: 0.62, rain: 0, steps: 10 },
-  vista: { hour: 16.0, tide: 0.55, rain: 0, steps: 12 },
+  vista: { hour: 17.35, tide: 0.55, rain: 0, steps: 12, wanted: 3, heat: 82 },
   shooting: { hour: 11.66, tide: 0.68, rain: 0, steps: 33 },
 };
 
@@ -203,6 +214,16 @@ export function stageShot(name, game) {
     setTide(game.tide, cfg.tide);
     game.rain = cfg.rain;
     game.state = 'shot';
+    // R7/M4 — the wanted level is a property of the SHOT, not of the scene, so
+    // it is set once here and the four judge shots cannot drift apart again.
+    // It is re-asserted every step in main.js (game.shotWanted) because a
+    // scene that fires a weapon accrues real heat while it is stepped: street
+    // lands six SMG rounds, +10 heat each, which would carry ★3 to ★4 mid-shot.
+    if (cfg.wanted) {
+      game.wanted.stars = cfg.wanted;
+      game.wanted.heat = cfg.heat;
+      game.shotWanted = { stars: cfg.wanted, heat: cfg.heat };
+    }
     document.body.classList.remove('hud-minimal', 'hud-hidden');
     hideFps(game);
     const p = game.player;
@@ -226,7 +247,9 @@ export function stageShot(name, game) {
       // the one bright body in a frame full of black cruisers.
       const car = placeCar(game, 'sedan', -47, -167.5, Math.PI, 21.7, 0x2fd3c4);
       p.car = car; p.pos.copy(car.pos); p.heading = Math.PI;
-      game.wanted.heat = 118; game.wanted.stars = 4;
+      // Wanted level comes from SHOTS.cover (★3, heat 82) — set once in the
+      // common staging block above. Roadblock only exists at ★3+, and
+      // updatePolice leaves pol.blocks alone because it is non-empty.
       game.missions.job = JOBS[3]; game.missions.obj = 0;
       // Roadblock: 4.8 m spacing on 4.7 m-long bodies, so the three cars
       // butt together into one 14 m wall across the carriageway.
@@ -234,15 +257,16 @@ export function stageShot(name, game) {
       stageBlock(game, -45.0, -219);
       stageBlock(game, -40.2, -219);
       // Pursuers: two flanking the sedan on the shoulders (clear of its
-      // silhouette and of the sight line to it), two more just behind the
-      // camera so the ★4 unit count is satisfied without a third car
-      // crowding the hero, one beyond the block for depth. ★4 wants five
-      // units (stars + 1), so staging exactly five keeps updatePolice from
-      // dropping an extra cruiser 120 m away.
+      // silhouette and of the sight line to it), one just behind the camera,
+      // one beyond the block for depth. R7/M4 dropped the second car behind
+      // the camera: the shot is ★3 now, and ★3 wants four units (stars + 1,
+      // see updatePolice), so staging exactly four keeps updatePolice from
+      // spawning an extra cruiser 120 m away. The car removed was the one at
+      // z -164, i.e. behind the lens and therefore never in frame — the
+      // picture keeps the same four visible vehicles it had at ★4.
       stageCruiser(game, -53.4, -196, Math.PI);
       stageCruiser(game, -40.4, -197, Math.PI);
       stageCruiser(game, -56.5, -164, Math.PI);
-      stageCruiser(game, -33.0, -164, Math.PI);
       stageCruiser(game, -52.4, -236, Math.PI);
       // Helicopter. Two separate faults, so two fixes.
       // (1) FRAMING. v19/v20 hung it at (-33, 12, -214) → screen (938, 154),
@@ -255,40 +279,27 @@ export function stageShot(name, game) {
       // the one genuinely empty sky run in the frame (a pixel scan of the
       // previous render found clear sky only at x 700..920, y 50..160).
       // 3/4 yaw 0.75 shows length plus flank instead of a nose-on wedge.
-      // (2) SILHOUETTE. The stock mesh is a slab body plus one rotor plate —
-      // at any distance that renders as a signboard, which is exactly what
-      // the vision pass called it. The parts that make an aircraft legible
-      // at 65 m are added below, and the hull is repainted matte dark so it
-      // separates from the pale sky instead of picking up the warm fill
-      // (it measured 129,116,101 against a 163,140,118 sky: no contrast).
+      // (2) SILHOUETTE. The model itself now carries the aircraft parts — nose
+      // taper, cabin glazing, tail boom/fin/rotor, mast and 2-blade rotor,
+      // skids — all built in ai/police.js createPolice, and the hull is matte
+      // dark so it separates from the pale sky instead of picking up the warm
+      // fill. Staging here only places the aircraft; it adds no geometry.
       const heli = game.police.heli;
       game.police.forceHeli = true;
       heli.visible = true;
       heli.position.set(-34.7, 24.6, -252.9);
       heli.rotation.y = 0.75;
       heli.scale.setScalar(1.5);
-      const hullMat = new THREE.MeshStandardMaterial({ color: 0x151e2a, roughness: 0.85, metalness: 0.08 });
-      const darkMat = new THREE.MeshStandardMaterial({ color: 0x0a0e13, roughness: 0.9, metalness: 0.05 });
-      const glassMat = new THREE.MeshStandardMaterial({ color: 0x2b4a63, roughness: 0.3, metalness: 0.1 });
-      // Index 0 is the body, 1 the main rotor (see ai/police.js createPolice).
-      const heliParts = heli.children.filter((c) => c.isMesh);
-      if (heliParts[0]) heliParts[0].material = hullMat;
-      if (heliParts[1]) heliParts[1].material = darkMat;
-      const addHeliBox = (w, h, d, x, y, z, mat) => {
-        const b = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat);
-        b.position.set(x, y, z);
-        heli.add(b);
-      };
-      addHeliBox(0.55, 0.55, 4.4, 0, 0.05, 5.4, hullMat);   // tail boom
-      addHeliBox(0.16, 1.2, 1.0, 0, 0.6, 7.4, hullMat);     // tail fin
-      addHeliBox(0.1, 1.3, 0.18, 0.42, 0.6, 7.4, darkMat);  // tail rotor
-      addHeliBox(2.46, 0.52, 1.7, 0, 0.28, 2.0, glassMat);  // cabin glazing band
-      addHeliBox(7.6, 0.14, 0.42, 0, 1.16, 0, darkMat);     // rotor blade, darker than the hull
-      for (const sx of [-1, 1]) addHeliBox(0.15, 0.15, 3.6, sx * 0.95, -1.05, 0.3, darkMat); // skids
       // Oncoming traffic beyond the block for depth; palms line the verges
       // already.
       placeCar(game, 'compact', -41.5, -232, 0, 0, 0xd8b13c);
       placeCar(game, 'truck', -49.5, -247, 0, 0, 0x7a6a4a);
+      // R7/M5 — busier boulevard: two more oncoming cars in the far lanes and
+      // onlookers on the east sidewalk, clear of the hero car, the block and
+      // the helicopter's sky (the heli hangs 24 m up, these stand on the ground).
+      placeCar(game, 'sedan', -38.5, -240, 0, 0, 0x3a6db8);
+      placeCar(game, 'compact', -44.5, -256, 0, 0, 0xc96a2f);
+      for (let i = 0; i < 4; i++) spawnPed(game.peds, -36.5, -205 - i * 9);
       // Wreck-side onlookers, west sidewalk only: anything on the east kerb
       // would stand between this camera and the car.
       for (let i = 0; i < 5; i++) spawnPed(game.peds, -53.5, -168 - i * 9);
@@ -360,7 +371,6 @@ export function stageShot(name, game) {
         if (marks[i]) gm.pos.set(marks[i][0], 0, marks[i][1]);
         gm.shootT = 9; // hold fire: a hit in the last steps would shake the frame
       });
-      game.wanted.heat = 45; game.wanted.stars = 2;
       game.missions.job = JOBS[5]; game.missions.obj = 0;
       // Cruisers brake in. The near one stops 12 m off Raka's right, on the
       // open verge — close enough for updatePolice to deploy its officer
@@ -368,12 +378,52 @@ export function stageShot(name, game) {
       // ground instead of being tucked behind a car body. The others stay
       // past the deploy radius or far down the street, so the frame keeps one
       // readable officer rather than a crowd converging on the lens.
+      // R7/M4 — wanted is ★3 here too (SHOTS.street), and ★3 wants four
+      // units (stars + 1), so these four staged cruisers already satisfy
+      // updatePolice: nothing extra spawns 120 m away and the staging is
+      // unchanged.
       stageCruiser(game, 67.5, -237.5, -Math.PI / 2);
       stageCruiser(game, 86, -232, 2.4);
       stageCruiser(game, 100, -224.5, -1.4);
-      stageCruiser(game, 122, -228, -1.9);
-      stageTraffic(game, 96, -225);
-      stageTraffic(game, 40, -225);
+      // Fourth unit, held behind the lens. At ★2 updatePolice wanted three
+      // units and popped the staged four down to three, so this car used to be
+      // discarded; at ★3 the requirement is four, so it stays and no extra
+      // cruiser spawns 120 m away. (30, -200) is 46 m BEHIND the camera at
+      // (58.3, 1.9, -223.2) — camera z = +38, i.e. out of the frustum — and
+      // 42 m from the player, past the 22 m deploy radius, so it neither
+      // shows in frame nor walks an officer into it.
+      stageCruiser(game, 30, -200, Math.PI / 2);
+      // R7/H3 — traffic that is actually IN the frame. The old spots were all
+      // on the boulevard (z≈-221..-228) and none could ever show: the camera
+      // stands at (58.3, 1.9, -223.2), INSIDE that carriageway, aimed
+      // south-east down the promenade. stageTraffic() snaps to the nearest
+      // road edge and updateTraffic() then drives the car down it in the
+      // right-hand lane, and the road graph has no westbound boulevard edge —
+      // so every boulevard car ends up on the z -223.25 lane, which runs
+      // almost along the view ray. Measured in the live frame: a car anywhere
+      // on that lane projects to x 1302..1526 (its vanishing point is at
+      // x≈1363, past the 1280 edge) and anything nearer the lens falls behind
+      // it. That is why the shot read as an empty road.
+      // The cross avenue at x=135 is the one stretch of road this camera
+      // actually sees: it recedes through the middle-right of the picture,
+      // between the two blocks, and its own right-hand lane (x 133.25)
+      // projects inside the frame across the whole staged range. Four cars are
+      // staged along it, spaced 6-10 m so they read as a queue rolling south
+      // rather than a parked row. Verified in the live frame: each car lands
+      // 60..75 m out, spans px 909..1261 (right margin 19 px, so nothing is
+      // clipped by the 1280 edge), keeps its wheels on the tarmac with all
+      // four ground corners inside the kerbs at x 129..141, and a raycast from
+      // the shot camera to 0.8 m and 1.4 m above the road at each spot hits
+      // nothing — no building or sidewalk hides them. The nearest sits right
+      // at updateTraffic's 60 m siren pull-over radius and still holds its
+      // lane, so the queue keeps rolling as ordinary traffic instead of
+      // braking to the kerb.
+      stageTraffic(game, 135, -234);
+      stageTraffic(game, 135, -240);
+      stageTraffic(game, 135, -246);
+      stageTraffic(game, 135, -256);
+      for (let i = 0; i < 5; i++) spawnPed(game.peds, 58 + i * 5, -242);
+      buildAwning(game.scene, 82, -250, { ry: 0, colors: ['#2f6db8', '#f2ede2'] });
       // Sidewalk crowd, shirts from the ped palette.
       for (let i = 0; i < 9; i++) {
         spawnPed(game.peds, 52 + i * 6, i % 2 ? -216 : -234);
@@ -446,6 +496,9 @@ export function stageShot(name, game) {
       const RX = SX + 2.50, RZ = SZ + 2.60;
       p.pos.set(RX, 0, RZ);
       p.heading = Math.atan2(HX - RX, HZ - RZ);
+      // Wanted comes from SHOTS.dialog (★3, heat 82). No cruisers are staged
+      // and none appear: step() returns on its first frame while the dialog is
+      // open (main.js), so updatePolice never runs and never spawns a unit.
       game.missions.job = JOBS[0]; game.missions.obj = 0;
       // Hasan's stand-in (the game has no named-character mesh). Recolour him
       // to the job's own palette (Hasan = blue shirt, amber accent) so the two
@@ -523,6 +576,17 @@ export function stageShot(name, game) {
       // stood between the camera and Raka. They now sit well down the row
       // (x offsets +3..+9, further out in z) so they read as background.
       for (let i = 0; i < 4; i++) spawnPed(game.peds, SX + 3.6 + i * 2.0, SZ - 3.0 - i * 0.5);
+      // R7/M5 — the row continues: three more walkers further down, and the
+      // neighbouring kiosk gets its own striped awning with a customer under
+      // it, so the frame reads as a market row. The awning sits at SX+3.8
+      // (right of Raka, canopy above his head height) with its customer just
+      // in front of it; the main stall's sign and price board stay clear.
+      for (let i = 0; i < 3; i++) spawnPed(game.peds, SX + 11.6 + i * 2.0, SZ - 5.0 - i * 0.5);
+      buildAwning(game.scene, SX + 3.8, SZ + 0.8, { w: 3.0, ry: 0, colors: ['#2f6db8', '#f2ede2'] });
+      // Customer UNDER the neighbour awning (SZ+0.2, behind its front edge),
+      // 2.4 m behind Raka and 1.3 m to his right — a separate figure at the
+      // next kiosk, not a second body crowding Raka's shoulder.
+      spawnPed(game.peds, SX + 3.8, SZ + 0.2);
       const { showDialog } = game.dialogApi;
       showDialog(JOBS[0].dialog, null);
       // Camera. Measured against the 1280x720 frame, not guessed: from
@@ -610,23 +674,67 @@ export function stageShot(name, game) {
       // The pylon sits at x≈755 with its base at y≈407 and the deck running
       // away to x≈758 at z -360, so the span reads across the middle band
       // with open water behind it and the boulevard in the foreground.
+      // R7 (module 3a) — measured fault: the R6 pose stood 8 m before the ramp
+      // at y 3.4, i.e. 3.2 m UNDER the deck surface (deck top is 6.6). From
+      // below, the span is only ever seen as its shadowed flank and underside,
+      // which is why the right of the frame read as one near-black slab, and
+      // the pylon 83 m away was tall enough to be cropped by the top edge — a
+      // fat column through the centre-right.
+      // Two changes, both geometric, nothing faked:
+      //   - the camera rises to y 19 and steps back to z -192, so it looks
+      //     DOWN on the span from 12 m above it and sees its tarmac and lane
+      //     paint instead of its underside; the pylon is 125 m out, so the
+      //     whole leaning mast, its amber band and its cable fan sit inside the
+      //     frame (tip at y≈38 of 720, sky above it) as a 43-px mast at x
+      //     737–780 — a landmark on the right third, not a wall;
+      //   - the aim swings west of the bridge axis (look.x -72), which carries
+      //     the rooftop billboard out of the sight line to the deck: it moves
+      //     from dead centre to x 178–327, where it frames the approach
+      //     instead of masking it, and the Tanjung Mas tower is pushed to
+      //     x 1084+ so it no longer crowds the frame.
+      // At this pose the deck occupies a 65-px band (y 413–478) spanning
+      // x 743–984 with water behind it and the boulevard below.
       p.mode = 'foot';
-      p.pos.set(-56, 0, -234); p.heading = Math.PI;
+      p.pos.set(-53, 0, -206); p.heading = Math.PI;
+      // R7/M4 — wanted is ★3 in all four judge shots (SHOTS.vista). ★3 makes
+      // updatePolice want four units and it spawns any shortfall 120 m from
+      // the player, which from this pose lands inside the frame (the aim runs
+      // 138 m down the boulevard). Four cruisers are staged behind the lens
+      // instead: z -166..-176 is behind the camera's z -192, so they satisfy
+      // the unit count without putting anything new in the picture. They idle
+      // rather than converge — 12 steps at 1/60 s is 0.2 s, and at 30+ m they
+      // never reach the 22 m deploy radius, so no officer and no gunfire.
+      stageCruiser(game, -56.0, -166, Math.PI);
+      stageCruiser(game, -49.0, -170, Math.PI);
+      stageCruiser(game, -57.5, -176, Math.PI);
+      stageCruiser(game, -44.0, -172, Math.PI);
       game.camOverride = {
-        pos: { x: -56.0, y: 3.4, z: -232.0 },
-        look: { x: -60.0, y: 11.5, z: -320.0 }, fov: 44,
+        pos: { x: -56.0, y: 19.0, z: -192.0 },
+        look: { x: -72.0, y: 20.0, z: -330.0 }, fov: 56,
       };
-      // Foreground: the queued column on the ramp approach (all on flat road —
-      // the ramp only lifts from z=-240), the truck low-left for mass, and a
-      // traffic car mid-frame so the eye has something to pass over.
-      placeCar(game, 'sedan', -47.5, -252, Math.PI, 0, 0x8a2f2f);
-      placeCar(game, 'compact', -43.0, -258, Math.PI, 0, 0xd8b13c);
-      placeCar(game, 'truck', -56.5, -250, Math.PI, 0, 0x7a6a4a);
-      placeCar(game, 'sedan', -52.0, -246, Math.PI, 0, 0xe8e2d4);
-      // Pedestrians on the west sidewalk only — the east verge is where the
-      // right-hand tower stands, and anything there would re-crowd the frame.
+      // Foreground: the queued traffic on the flat approach (the ramp only
+      // lifts north of z=-240, and these props are never stepped, so anything
+      // past that would sink under the rising slab). At z -222..-240 they
+      // project to y≈620–710 — the bottom band of the frame — which is what
+      // keeps the near third from being an empty apron of asphalt.
+      placeCar(game, 'truck', -57.0, -228, Math.PI, 0, 0x7a6a4a);
+      placeCar(game, 'sedan', -48.0, -236, Math.PI, 0, 0x8a2f2f);
+      placeCar(game, 'compact', -42.0, -222, Math.PI, 0, 0xd8b13c);
+      placeCar(game, 'sedan', -52.0, -240, Math.PI, 0, 0xe8e2d4);
+      // R7/M5 — a fuller queue on the flat approach: two more cars slotted
+      // into the gaps of the existing diagonal (5+ m clear of every neighbour
+      // so nothing intersects), and five more walkers continuing down the
+      // west sidewalk. The pylon and deck stay dominant; the camera is untouched.
+      placeCar(game, 'sedan', -44.0, -232, Math.PI, 0, 0x2f6db8);
+      placeCar(game, 'compact', -58.0, -238, Math.PI, 0, 0x8a6d2f);
+      // Pedestrians on the west sidewalk (x -53, the 4 m strip) only — the east
+      // verge is where the right-hand tower stands, and anything there would
+      // re-crowd the frame.
       for (let i = 0; i < 7; i++) {
-        spawnPed(game.peds, -59.5, -244 - i * 7);
+        spawnPed(game.peds, -53.0, -224 - i * 5);
+      }
+      for (let i = 0; i < 5; i++) {
+        spawnPed(game.peds, -53.0, -259 - i * 4);
       }
     }
     // Sync the player figure to the staged pose: the dialog shot never
