@@ -60,6 +60,69 @@ function stopFace(num, dest) {
   return t;
 }
 
+// Striped awning canvas, painted the same way city.js paints the shopfront
+// awnings (8 vertical stripes, shaded hem) so a prop awning reads as part of
+// the same street. Kept local: city.js does not export its painter, and this
+// prop must work in a scene that has no shopfront behind it.
+function awningStripe(a, b) {
+  const c = document.createElement('canvas'); c.width = 128; c.height = 32;
+  const g = c.getContext('2d');
+  for (let i = 0; i < 8; i++) { g.fillStyle = (i & 1) ? a : b; g.fillRect(i * 16, 0, 16, 32); }
+  g.fillStyle = 'rgba(0,0,0,0.20)'; g.fillRect(0, 25, 128, 7);
+  const t = new THREE.CanvasTexture(c);
+  t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = 16;
+  return t;
+}
+
+// A free-standing striped awning: the canopy over a kiosk or a shop doorway.
+// Exported so a shot can dress a corner of its own staging with the same
+// canopy language the built city uses — a sloping canvas, a hanging valance
+// and two poles, bedded on the ground so nothing floats.
+//   buildAwning(scene, x, z, opts)
+//     opts.w      canopy width   (default 3.4 m, across x before ry)
+//     opts.d      canopy depth   (default 1.7 m, its overhang)
+//     opts.y      canopy height at the wall edge (default 2.55 m)
+//     opts.ry     yaw, typically the shopfront's facing
+//     opts.colors [stripeA, stripeB] hex strings
+//     opts.poles  false to hang it off a wall with no legs
+// No collision box: a canopy at 2.4+ m is above every actor's head, and adding
+// one would change how the street plays.
+export function buildAwning(scene, x, z, opts = {}) {
+  const w = opts.w ?? 3.4, d = opts.d ?? 1.7, y = opts.y ?? 2.55, ry = opts.ry ?? 0;
+  const colors = opts.colors ?? ['#e0453a', '#f2ede2'];
+  const g = new THREE.Group();
+  const mat = new THREE.MeshStandardMaterial({ map: awningStripe(colors[0], colors[1]), roughness: 0.9 });
+  // Canopy: tilted 12° down toward the street so it sheds and catches the sky
+  // at the front edge instead of reading as a flat slab pasted on a wall.
+  const slope = 0.21;
+  const canopy = new THREE.Mesh(new THREE.BoxGeometry(w, 0.09, d), mat);
+  canopy.position.set(0, y, 0);
+  canopy.rotation.x = slope;
+  canopy.castShadow = true;
+  g.add(canopy);
+  // Valance: the short hanging skirt on the street edge, in the same stripes.
+  const hem = new THREE.Mesh(new THREE.BoxGeometry(w, 0.30, 0.05), mat);
+  hem.position.set(0, y - 0.20 - d * 0.5 * Math.sin(slope), d / 2 * Math.cos(slope));
+  hem.rotation.x = slope;
+  g.add(hem);
+  // Poles on the street edge, bedded on the ground and meeting the canopy's
+  // underside — the canopy is carried, not floating.
+  if (opts.poles !== false) {
+    const poleH = y - 0.005 - (d / 2) * Math.sin(slope);
+    for (const s of [-1, 1]) {
+      const pole = new THREE.Mesh(new THREE.BoxGeometry(0.075, poleH, 0.075),
+        new THREE.MeshStandardMaterial({ color: 0x3a3f46, roughness: 0.7, metalness: 0.3 }));
+      pole.position.set(s * (w / 2 - 0.10), poleH / 2, d / 2 * Math.cos(slope) - 0.06);
+      pole.castShadow = true;
+      g.add(pole);
+    }
+  }
+  g.position.set(x, 0, z);
+  g.rotation.y = ry;
+  scene.add(g);
+  return g;
+}
+
 export function buildProps(scene, rng) {
   // Billboards along the boulevard. Each face is a painted creative; the
   // posts stand on the verge and the face is clamped to the top of them.
