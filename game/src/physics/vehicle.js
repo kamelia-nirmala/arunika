@@ -1,6 +1,11 @@
 // Arcade vehicle physics: grip, drift, suspension, collisions. The model is
 // a velocity vector split into forward/lateral parts; lateral grip decays
 // the sideways part, and the handbrake cuts that grip so the tail steps out.
+//
+// Light dressing (R6, visual only): real emissive lamps so a car reads as a
+// car at golden hour, dark glass instead of a body-coloured block, and a
+// bright rim disc on the outer face of every wheel. No new lights, no change
+// to any dimension, wheel position, ground clearance or collision radius.
 import * as THREE from 'three';
 import { VEHICLES } from '../config.js';
 import { clamp, lerp, smooth } from '../random.js';
@@ -9,7 +14,13 @@ import { groundHeight, onRoad } from '../world/roads.js';
 
 const wheelGeo = new THREE.CylinderGeometry(0.34, 0.34, 0.24, 10);
 const tireMat = new THREE.MeshStandardMaterial({ color: 0x141414, roughness: 1 });
-const glassMat = new THREE.MeshStandardMaterial({ color: 0x1a2836, roughness: 0.2, metalness: 0.6 });
+// Rim disc: small, bright, one per wheel, parented to the wheel so it inherits
+// the existing spin and steering untouched.
+const rimGeo = new THREE.CylinderGeometry(0.21, 0.21, 0.035, 8);
+const rimMat = new THREE.MeshStandardMaterial({ color: 0xb9bcc0, roughness: 0.35, metalness: 0.65 });
+// Dark glass: low roughness + high metalness so the cabin reads as a coated
+// pane catching the sky, not as a second slab of paint.
+const glassMat = new THREE.MeshStandardMaterial({ color: 0x0d1822, roughness: 0.12, metalness: 0.88 });
 
 export function buildCarMesh(kind, color) {
   const spec = VEHICLES[kind];
@@ -30,13 +41,18 @@ export function buildCarMesh(kind, color) {
     const mirror = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.12, 0.22), trimMat);
     mirror.position.set(s * (spec.wid / 2 + 0.06), 1.02, spec.len * 0.18); body.add(mirror);
   }
-  // Headlights + taillights.
-  const hl = new THREE.MeshStandardMaterial({ color: 0xfff2c0, emissive: 0x554400 });
+  // Headlights + taillights. Emissive (no photometric lights): a warm cream
+  // lens with a hot rim, and a red rear lens that also lifts on the brakes.
+  const hl = new THREE.MeshStandardMaterial({
+    color: 0xfff4cf, emissive: 0xffd489, emissiveIntensity: 2.4, roughness: 0.3,
+  });
+  const tl = new THREE.MeshStandardMaterial({
+    color: 0x9e1414, emissive: 0xd11a12, emissiveIntensity: 1.5, roughness: 0.4,
+  });
   for (const s of [-1, 1]) {
     const h = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.14, 0.06), hl);
     h.position.set(s * (spec.wid / 2 - 0.35), 0.62, spec.len / 2); body.add(h);
-    const t = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.14, 0.06),
-      new THREE.MeshStandardMaterial({ color: 0xaa1111, emissive: 0x330000 }));
+    const t = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.14, 0.06), tl);
     t.position.set(s * (spec.wid / 2 - 0.35), 0.62, -spec.len / 2); body.add(t);
   }
   const wheels = [];
@@ -44,7 +60,15 @@ export function buildCarMesh(kind, color) {
     const w = new THREE.Mesh(wheelGeo, tireMat);
     w.rotation.z = Math.PI / 2;
     w.position.set(sx * (spec.wid / 2 - 0.1), 0.34, sz * (spec.len / 2 - 0.7));
-    w.castShadow = true; g.add(w); wheels.push(w);
+    w.castShadow = true;
+    // Rim on the OUTER face. The wheel's cylinder axis is its local +Y (the
+    // z=90° lay-flat maps local +Y to world -X), so the outer side is local
+    // y = -sx*0.13: it lands proud of the 0.24 m tire and is seen face-on from
+    // outside the car. Parented, so spin and steer come for free.
+    const rim = new THREE.Mesh(rimGeo, rimMat);
+    rim.position.y = -sx * 0.13;
+    w.add(rim);
+    g.add(w); wheels.push(w);
   }
   g.add(body);
   // Soft contact shadow: grounds the car on the road without a shadow-map
@@ -52,7 +76,7 @@ export function buildCarMesh(kind, color) {
   const blob = new THREE.Mesh(new THREE.PlaneGeometry(spec.wid + 0.7, spec.len + 0.7),
     new THREE.MeshBasicMaterial({ color: 0x000000, transparent: true, opacity: 0.3, depthWrite: false }));
   blob.rotation.x = -Math.PI / 2; blob.position.y = 0.06; g.add(blob);
-  return { group: g, body, wheels };
+  return { group: g, body, wheels, headMat: hl, tailMat: tl };
 }
 
 export function createVehicle(kind, x, z, heading, color) {
@@ -129,6 +153,8 @@ export function stepVehicle(v, input, dt, tide) {
   v.mesh.body.position.y = v.bob;
   v.rpm = clamp(spd / top, 0, 1);
   v.smoke = v.slip > 2.2;
+  // Rear lens brightens under braking — one emissive value, no extra light.
+  if (v.mesh.tailMat) v.mesh.tailMat.emissiveIntensity = input.brake ? 3.4 : 1.5;
   for (const w of v.mesh.wheels) w.rotation.x += (v.speed / 0.34) * dt;
   if (v.mesh.wheels[0]) v.mesh.wheels[0].rotation.y = -v.steer * 0.8;
   if (v.mesh.wheels[1]) v.mesh.wheels[1].rotation.y = -v.steer * 0.8;
