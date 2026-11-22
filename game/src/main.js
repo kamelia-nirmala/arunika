@@ -186,7 +186,14 @@ function step(dt) {
   if (g.state !== 'play' && g.state !== 'shot') return;
   const p = g.player;
   const prevMode = p.mode;
-  stepPlayer(p, dt, g.cars, g.tide.t);
+  // ONE aim vector per frame: the camera forward. stepPlayer solves the gun
+  // arm's pose from it and fire() shoots along it, so the arm, the muzzle, the
+  // flash and the tracer cannot disagree — they are all derived from here.
+  // Sampled before stepPlayer so the pose and the shot in the same step use
+  // the identical vector.
+  const aimVec = new THREE.Vector3();
+  camera.getWorldDirection(aimVec);
+  stepPlayer(p, dt, g.cars, g.tide.t, aimVec);
   // Carjacked a car with a driver: heat + panicking witnesses.
   if (prevMode === 'jacking' && p.mode === 'driving') {
     addHeat(g.wanted, 8);
@@ -282,9 +289,8 @@ function step(dt) {
     cv.style.height = big ? '190px' : '480px';
   }
   if (p.mode === 'foot' && input.held('fire')) {
-    const dir = new THREE.Vector3();
-    camera.getWorldDirection(dir);
-    const res = fire(g.weapons, p, { x: dir.x, z: dir.z }, g.gangs, g.police, (x, y, z) => fx.muzzle(x, y, z));
+    // Same vector the arm was posed from this frame — not a fresh sample.
+    const res = fire(g.weapons, p, aimVec, g.gangs, g.police, (x, y, z) => fx.muzzle(x, y, z));
     if (res === 'shot' || res === 'hit') {
       g.audio.shot();
       addHeat(g.wanted, 10);
@@ -407,7 +413,22 @@ if (SHOT) {
   const steps = stageShot(SHOT, g);
   for (let i = 0; i < steps; i++) {
     if (SHOT === 'cover' && g.player.car) g.player.car.speed = 21.7;
+    // R7/M4 — a shot's wanted level is fixed, not earned. Street fires six
+    // SMG rounds while it is stepped and each adds 10 heat; updateWanted
+    // (which runs after updatePolice in step()) would turn that into a fourth
+    // star, and the next updatePolice call would then spawn a fifth cruiser.
+    // Re-assert the staged value before every step so updatePolice always
+    // reads the shot's own level, and once more after the loop so the HUD
+    // renders it.
+    if (g.shotWanted) {
+      g.wanted.heat = g.shotWanted.heat;
+      g.wanted.stars = g.shotWanted.stars;
+    }
     step(STEP);
+  }
+  if (g.shotWanted) {
+    g.wanted.heat = g.shotWanted.heat;
+    g.wanted.stars = g.shotWanted.stars;
   }
   if (g.camOverride) {
     camera.position.set(g.camOverride.pos.x, g.camOverride.pos.y, g.camOverride.pos.z);
