@@ -56,7 +56,14 @@ export function buildCarMesh(kind, color) {
     clearcoat: 0.8, clearcoatRoughness: 0.15 });
   const lower = new THREE.Mesh(boxOf(spec.wid, 0.62, spec.len), paint);
   lower.position.y = 0.55; lower.castShadow = true; body.add(lower);
-  const cabin = new THREE.Mesh(boxOf(spec.wid - 0.3, 0.55, cabDepth), glassMat);
+  // R8/M4b — the cabin is 0.53 tall, not 0.55, so its TOP (1.365) sits 1 cm
+  // under the roof cap's top (1.375). At 0.55 the two up-facing planes were
+  // exactly coplanar and the depth buffer fought over every pixel of the roof:
+  // from the chase cam that artifact read as a grid of dark squares over the
+  // rear glass and the roof (the "kotak-kotak" fault). One centimetre is below
+  // any visible step and leaves the roof as the only surface at 1.375, which
+  // is the height police.js still hangs its lightbar on.
+  const cabin = new THREE.Mesh(boxOf(spec.wid - 0.3, 0.53, cabDepth), glassMat);
   cabin.position.set(0, 1.1, cabZ); cabin.castShadow = true; body.add(cabin);
   // --- Cabin, read as glazing in a body-coloured frame ---------------------
   // The single glass block above stays as the window mass, so the car's outer
@@ -69,9 +76,15 @@ export function buildCarMesh(kind, color) {
   roof.position.set(0, 1.3475, cabZ); roof.castShadow = true; body.add(roof);
   // A and C pillars: full-width hoops at the cabin's front and rear edges.
   // Thin (10 cm) so they read as posts, not as extra body volume.
+  // R8/M4b — they used to be centred at cabDepth/2 - 0.05, which put their
+  // outer face EXACTLY on the cabin's front/rear face. The C-pillar's 0.10 m
+  // paint face and the rear glass therefore shared a plane and the depth
+  // buffer diced them into the grid of squares the reviewer saw through the
+  // rear window. Pulling them 5 mm out makes the pillar stand proud of the
+  // glass — the way a real pillar does — and the plane fight is gone.
   for (const s of [1, -1]) {
     const hoop = new THREE.Mesh(boxOf(spec.wid - 0.26, 0.51, 0.10), paint);
-    hoop.position.set(0, 1.095, cabZ + s * (cabDepth / 2 - 0.05));
+    hoop.position.set(0, 1.095, cabZ + s * (cabDepth / 2 - 0.045));
     hoop.castShadow = true; body.add(hoop);
   }
   // Beltline: the painted rail where glass meets door, closing the window box
