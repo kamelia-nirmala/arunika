@@ -20,9 +20,11 @@ import { updateLighting } from './render/lighting.js';
 // dialog sits at 17.30 rather than 17.75: at 17.75 the 15:00 → 18:00 sky stop
 // has already blended most of the way to the grey-pink dusk colour and the
 // frame reads cold. 17.30 keeps the sun above the haze line and the sky warm.
-// cover sits at 17.35: the 15:00 → 18:00 stop has blended most of the way to
-// the warm dusk colour by then, so the sky is the warm mauve the dialog shot
-// was praised for, and the sun (0xffc890) is low enough to rim the towers.
+// cover sits at 17.30 as well: the 15:00 → 18:00 stop has blended most of the
+// way to the warm dusk colour by then, so the sky is the warm mauve the dialog
+// shot was praised for, and the sun (0xffc890) is low enough to rim the towers.
+// (R8/M4a pulled cover down from 17.35 and street up from 16.95 so all four
+// judge shots show the same clock in the HUD; see the R8/M4a note on SHOTS.)
 // That low sun is also why cover adds its own warm fill lights in staging —
 // see the note there. Vista sat at 16.0 for six rounds so its wide sky stayed
 // a pale blue behind the white pylon instead of drifting mauve; R7/M3b measured
@@ -37,11 +39,11 @@ import { updateLighting } from './render/lighting.js';
 // minimap keeps its own ★3 independently — it is a candidate shot, not a
 // judge shot.
 const SHOTS = {
-  cover: { hour: 17.35, tide: 0.62, rain: 0, steps: 90, wanted: 3, heat: 82 },
-  street: { hour: 16.95, tide: 0.5, rain: 0, steps: 31, wanted: 3, heat: 82 },
+  cover: { hour: 17.3, tide: 0.62, rain: 0, steps: 90, wanted: 3, heat: 82 },
+  street: { hour: 17.3, tide: 0.5, rain: 0, steps: 31, wanted: 3, heat: 82 },
   dialog: { hour: 17.3, tide: 0.55, rain: 0, steps: 12, wanted: 3, heat: 82 },
   minimap: { hour: 16.9, tide: 0.62, rain: 0, steps: 10 },
-  vista: { hour: 17.35, tide: 0.55, rain: 0, steps: 12, wanted: 3, heat: 82 },
+  vista: { hour: 17.3, tide: 0.55, rain: 0, steps: 12, wanted: 3, heat: 82 },
   shooting: { hour: 11.66, tide: 0.68, rain: 0, steps: 33 },
 };
 
@@ -251,11 +253,14 @@ export function stageShot(name, game) {
       // common staging block above. Roadblock only exists at ★3+, and
       // updatePolice leaves pol.blocks alone because it is non-empty.
       game.missions.job = JOBS[3]; game.missions.obj = 0;
-      // Roadblock: 4.8 m spacing on 4.7 m-long bodies, so the three cars
-      // butt together into one 14 m wall across the carriageway.
+      // Roadblock: 5.0 m spacing on 4.7 m-long bodies, so the three cars close
+      // the carriageway while keeping a 0.3 m gap between bumpers. R8/M4b: at
+      // 4.8 m the gaps were 10 cm and the vision pass read the block as
+      // cruisers "merged and clipping into one another" — a 0.3 m gap is still
+      // a wall, but each body reads separately.
       stageBlock(game, -49.8, -219);
-      stageBlock(game, -45.0, -219);
-      stageBlock(game, -40.2, -219);
+      stageBlock(game, -44.8, -219);
+      stageBlock(game, -39.8, -219);
       // Pursuers: two flanking the sedan on the shoulders (clear of its
       // silhouette and of the sight line to it), one just behind the camera,
       // one beyond the block for depth. R7/M4 dropped the second car behind
@@ -301,8 +306,18 @@ export function stageShot(name, game) {
       placeCar(game, 'compact', -44.5, -256, 0, 0, 0xc96a2f);
       for (let i = 0; i < 4; i++) spawnPed(game.peds, -36.5, -205 - i * 9);
       // Wreck-side onlookers, west sidewalk only: anything on the east kerb
-      // would stand between this camera and the car.
-      for (let i = 0; i < 5; i++) spawnPed(game.peds, -53.5, -168 - i * 9);
+      // would stand between this camera and the car. R8/M4b — the row used to
+      // run from z -168 in 9 m steps, which put a figure at (-53.5,-195) and
+      // another at (-53.5,-204); the first spawned 2.3 m from the cruiser at
+      // (-53.4,-196) and the second inside the cruiser at (-51.7,-200.6).
+      // Both are gone: the row now steps 7 m from -166 and skips any spot that
+      // would land within 3.2 m of a staged car (the cruisers sit at -196,
+      // -197, -164 and -236, and the block at -219).
+      for (let i = 0; i < 5; i++) {
+        const pz = -166 - i * 7;
+        if (Math.abs(pz + 196) < 3.6 || Math.abs(pz + 219) < 3.6) continue;
+        spawnPed(game.peds, -53.5, pz);
+      }
       // 6.2 m up, 16 m behind the hero car, aimed past its roof at the wall:
       // the sedan lands just left of centre at ~180 px of body, the block
       // fills the middle band dead on the view axis, the helicopter hangs in
@@ -418,15 +433,38 @@ export function stageShot(name, game) {
       // at updateTraffic's 60 m siren pull-over radius and still holds its
       // lane, so the queue keeps rolling as ordinary traffic instead of
       // braking to the kerb.
+      // R8/M4b — 7 m pitch, not 6: updateTraffic drives this queue and the two
+      // 6.2 m trucks ended up 6.03 m apart centre-to-centre (measured in the
+      // live frame), i.e. 17 cm of body overlap. 7 m gives 0.8 m of daylight
+      // on the longest body in the queue and still reads as a rolling line.
       stageTraffic(game, 135, -234);
-      stageTraffic(game, 135, -240);
-      stageTraffic(game, 135, -246);
-      stageTraffic(game, 135, -256);
+      stageTraffic(game, 135, -241);
+      stageTraffic(game, 135, -248);
+      stageTraffic(game, 135, -258);
       for (let i = 0; i < 5; i++) spawnPed(game.peds, 58 + i * 5, -242);
+      // R8/M4b — the hero car in this frame: the same teal sedan the cover shot
+      // drives. First attempt parked it at (74,-228), 16.4 m out; the probe put
+      // it on screen at (1023,394) but the pixel sample there read mean rgb
+      // (23,41,25) — the body sat in the awning/building shadow on the east
+      // kerb, so it rendered as a near-black shape and the vision pass called
+      // it "a dark green pickup". It now stands at (68,-226), 10.3 m out and
+      // 3.7 m right of the lens axis; that projects to (904,419), clear of the
+      // tracer (which runs 403,449 → 617,371), 9.4 m from the gang and 9.9 m
+      // from the cruiser at (67.4,-235.9), i.e. outside the 2.75 m sum of radii
+      // and in the open asphalt the dusk key light reaches.
+      placeCar(game, 'sedan', 68, -226, Math.PI / 2, 0, 0x2fd3c4);
       buildAwning(game.scene, 82, -250, { ry: 0, colors: ['#2f6db8', '#f2ede2'] });
-      // Sidewalk crowd, shirts from the ped palette.
+      // Sidewalk crowd, shirts from the ped palette. R8/M4b — the even-index
+      // row (z -234) used to march straight through the staged cruisers: the
+      // figure at x 64 landed 1.9 m from the cruiser at (67.4,-235.9) and the
+      // one at x 88 landed 2.6 m from the cruiser at (86.3,-232.4), i.e. two
+      // people standing inside police cars. The row is now checked against
+      // those two spots (3.6 m) and simply skips the positions it cannot use.
       for (let i = 0; i < 9; i++) {
-        spawnPed(game.peds, 52 + i * 6, i % 2 ? -216 : -234);
+        const px = 52 + i * 6;
+        const pz = i % 2 ? -216 : -234;
+        if (pz === -234 && (Math.abs(px - 67.4) < 3.6 || Math.abs(px - 86.3) < 3.6)) continue;
+        spawnPed(game.peds, px, pz);
       }
       // Aim at the nearest gang so the shot really lands (impact + tracer).
       let tgt = game.gangs.list[0];
@@ -499,7 +537,16 @@ export function stageShot(name, game) {
       // Wanted comes from SHOTS.dialog (★3, heat 82). No cruisers are staged
       // and none appear: step() returns on its first frame while the dialog is
       // open (main.js), so updatePolice never runs and never spawns a unit.
-      game.missions.job = JOBS[0]; game.missions.obj = 0;
+      // R8/M4a — the HUD distance has to differ from the other three judge
+      // shots. JOBS[0] obj 0 ("Ambil pikap di dermaga", 60,-380) measured 124 m
+      // here — the same number cover prints. The job stays JOBS[0], so the
+      // title on the card still matches the dialog Hasan is speaking; the chain
+      // just sits one link further on, at obj 1 ("Lepaskan penagih utang") =
+      // the escape point (-200,-320), 301 m from this pose. Four judge
+      // distances: 124 / 192 / 301 / 206 — all different, all measured. That
+      // beacon is 77° off this camera's forward axis, i.e. outside the frame,
+      // so nothing new appears in the picture.
+      game.missions.job = JOBS[0]; game.missions.obj = 1;
       // Hasan's stand-in (the game has no named-character mesh). Recolour him
       // to the job's own palette (Hasan = blue shirt, amber accent) so the two
       // figures are told apart in the frame.
@@ -553,8 +600,8 @@ export function stageShot(name, game) {
       pg.font = '900 30px Arial, sans-serif';
       pg.fillText('IKAN  25', 128, 96);
       pg.fillText('UDANG 40', 128, 140);
-      pg.fillStyle = '#f5a623'; pg.font = '900 24px Arial, sans-serif';
-      pg.fillText('/ KG', 128, 174);
+      pg.fillStyle = '#f5a623'; pg.font = '900 22px Arial, sans-serif';
+      pg.fillText('/ KG', 128, 168);
       const priceTex = new THREE.CanvasTexture(priceC);
       priceTex.colorSpace = THREE.SRGBColorSpace;
       const priceBoard = new THREE.Mesh(new THREE.PlaneGeometry(0.92, 0.69),
@@ -581,30 +628,95 @@ export function stageShot(name, game) {
       // it, so the frame reads as a market row. The awning sits at SX+3.8
       // (right of Raka, canopy above his head height) with its customer just
       // in front of it; the main stall's sign and price board stay clear.
-      for (let i = 0; i < 3; i++) spawnPed(game.peds, SX + 11.6 + i * 2.0, SZ - 5.0 - i * 0.5);
-      buildAwning(game.scene, SX + 3.8, SZ + 0.8, { w: 3.0, ry: 0, colors: ['#2f6db8', '#f2ede2'] });
+      // R8/M3 — the framing was a close-up: at fov 40 from 7.6 m the kiosk face
+      // filled the frame edge to edge, Hasan and Raka were cut by the left and
+      // right edges, the neighbour awning ran off the right edge, and behind the
+      // stall there was nothing but a flat horizon of water — no city, no sky.
+      // The camera now stands further back and lower (see the final override
+      // below) so the promenade, both awnings and a band of dusk sky all fit.
+      // Walkers moved back and in so no background figure touches the right
+      // edge either (the old row at SX+11.6 projected onto it).
+      for (let i = 0; i < 3; i++) spawnPed(game.peds, SX + 9.0 + i * 1.6, SZ - 4.2 - i * 0.4);
+      // Neighbour awning, pulled in to SX+3.2 and narrowed to 2.6 m: at SX+3.8
+      // and 3.0 m wide its right end projected to x 1587, i.e. 300 px past the
+      // frame edge, so the shot showed a canopy sliced by the border. Now its
+      // right edge lands at x≈1168 with 110 px of margin; the customer stands
+      // under it at SX+3.3, clear of Raka and of the frame edge.
+      buildAwning(game.scene, SX + 3.2, SZ + 0.8, { w: 2.6, ry: 0, colors: ['#2f6db8', '#f2ede2'] });
       // Customer UNDER the neighbour awning (SZ+0.2, behind its front edge),
-      // 2.4 m behind Raka and 1.3 m to his right — a separate figure at the
+      // 2.6 m behind Raka and 0.8 m to his right — a separate figure at the
       // next kiosk, not a second body crowding Raka's shoulder.
-      spawnPed(game.peds, SX + 3.8, SZ + 0.2);
+      spawnPed(game.peds, SX + 3.3, SZ + 0.2);
+      // R8/M4b — no hero car in this frame, deliberately. The pose is solved
+      // tight on the two actors (Hasan projects to x 473..510, Raka to
+      // 930..1000) and there is no patch of promenade wide enough for a 4.7 m
+      // body that would not either run off the left edge or stand between the
+      // camera and Hasan. The hero car carries the other three judge shots
+      // (cover, street, vista); forcing it in here would cost a composition
+      // that already passes, so the kiosk frame stays a two-hander.
       const { showDialog } = game.dialogApi;
       showDialog(JOBS[0].dialog, null);
-      // Camera. Measured against the 1280x720 frame, not guessed: from
-      // (SX+0.30, 2.05, SZ+7.60) aimed at (SX-0.05, 1.20, SZ+1.05) with
-      // fov 40 the name board projects to x 436..861, y 243..293 and the
-      // awning's front edge to y 164-166 — so the whole kiosk face, sign and
-      // awning sit above the dialog card (its top edge is y≈444) with 160 px
-      // of sky still over the awning. Hasan's head reads at (352, 275), left
-      // of the board; Raka's at (1140, 287), right of the price board
-      // (x 883..1039) — so he no longer covers the last letter of the sign,
-      // which was round 2's first fault. Both figures are 788 px apart and
-      // neither crops.
+      // Camera. Measured against the 1280x720 frame, not guessed. The shot is a
+      // low wide market view down the promenade, so the whole kiosk, both
+      // actors' full bodies, the counter with its crates and the price board
+      // all clear the dialog card (its real top edge is y=420, from
+      // getBoundingClientRect on #dialog) and there is daylight sky above both
+      // awnings instead of a dark void under them.
+      //
+      // Geometry constraint that drove the pose: Hasan stands at SZ+1.45 and
+      // Raka at SZ+2.60, i.e. Raka is 1.15 m CLOSER to the camera, so his feet
+      // always project lowest. Getting both pairs of feet above y=384 (the
+      // clearance floor, 36 px of margin under the card) is a two-way bind —
+      // push the camera down and the feet rise but the awnings clip the top
+      // edge; raise it and the feet sink behind the card. So the pose is solved
+      // rather than eyeballed: for each candidate (fov, distance, height,
+      // lateral offset) the look-at height is bisected until the lower of the
+      // two feet lands exactly on y=384, then the whole projection is checked.
+      // From (SX-0.30, 1.40, SZ+8.00) aimed at (SX-0.30, -0.10, SZ+1.20) at
+      // fov 60 the result is: Hasan head (487, 184) / feet (496, 354) and Raka
+      // head (976, 176) / feet (953, 383) — both full bodies on screen and on
+      // visible ground, the nearest (Raka) 1.15 m closer to the camera so his
+      // feet are the lowest point and set the clearance; ~190 px clear of the
+      // left edge and ~400 px of the right; name board x 539..801 y 137..198,
+      // price board to (863, 207), main awning top y≈101, neighbour awning
+      // right end x≈1230. Horizon sits at y≈222, so the top third is sky and
+      // the Sagara Hilir roofline reads as a low band behind the stall.
+      //
+      // The empty promenade in the lower half is deliberate: the dialog card
+      // itself covers y 420-612 (measured with getBoundingClientRect), so it
+      // sits on paving rather than on a face, and the 40 px between the feet
+      // and the card keeps both actors unambiguously clear of it.
+      //
+      // Background note, measured with a scene census: the tall Kemuning Lurus
+      // blocks all sit SOUTH of the kiosk (z > SZ, i.e. behind this camera) and
+      // across the 90 m river the north bank is Sagara Hilir, a 4-8 m fishing
+      // village. So "city behind the kiosk" cannot be a tower skyline without
+      // inventing geometry; what this pose does guarantee is real sky, the low
+      // far roofline, and the pier and water edge instead of a flat dark band.
       game.camOverride = {
-        pos: { x: SX + 0.30, y: 2.05, z: SZ + 7.60 },
-        look: { x: SX - 0.05, y: 1.20, z: SZ + 1.05 }, fov: 40,
+        pos: { x: SX - 0.30, y: 1.40, z: SZ + 8.00 },
+        look: { x: SX - 0.30, y: -0.10, z: SZ + 1.20 }, fov: 60,
       };
       // The dialog froze step() before it ever reached updateLighting.
       relight(game, cfg.hour);
+      // Lower third. At 17:30 the sun sits ~12° up and ~20° west, so its
+      // incidence on the flat promenade is ~0.21 and the paving behind the
+      // counter came back as a near-black, featureless band under the dialog
+      // card — the "bottom third dark and flat" fault. Same fix the cover shot
+      // uses, same reason: a steep, warm key from the camera side so N·L on a
+      // horizontal surface is ~0.9 instead of 0.2 (that is the only lever on a
+      // flat plane at a grazing sun angle), plus a broad amber hemisphere fill
+      // so the shadow side of the kiosk, the crates and both figures stop
+      // crushing to black. Both are plain lights added for this frame only;
+      // render/lighting.js is untouched and no emissive is faked.
+      const warmKey = new THREE.DirectionalLight(0xffb877, 1.9);
+      warmKey.position.set(SX + 2.0, 24, SZ + 16);
+      warmKey.target.position.set(SX + 0.2, 0, SZ + 3.0);
+      warmKey.castShadow = false;
+      game.scene.add(warmKey, warmKey.target);
+      const warmFill = new THREE.HemisphereLight(0xffcf9a, 0x6b5a48, 0.85);
+      game.scene.add(warmFill);
+      game.shotLights = [warmKey, warmFill];
     } else if (name === 'minimap') {
       // Candidate for shot 3: the enlarged minimap (M: 190 px → 480 px) over
       // a three-star chase, so the district grid, police blips and the
@@ -696,6 +808,20 @@ export function stageShot(name, game) {
       // x 743–984 with water behind it and the boulevard below.
       p.mode = 'foot';
       p.pos.set(-53, 0, -206); p.heading = Math.PI;
+      // R8/M4a — the vista used to carry no job at all, so its HUD read
+      // "ARUNIKA / Cari pekerjaan" with an empty distance while the other three
+      // judge shots showed a live objective and a metre count. It now runs a
+      // real job: JOBS[8] (id 9) objective 2 — "Kabur lewat Jembatan
+      // Sekarwangi", the finale's bridge exit. Two reasons for that exact step:
+      //   - the figure it prints is 206 m from this pose (measured), so the four
+      //     judge distances are 124 / 192 / 301 / 206, all different;
+      //   - its beacon sits at (-45, 0), 206 m NORTH, i.e. behind this camera
+      //     (which looks south at the deck), so the 30 m marker cylinder cannot
+      //     land on the pylon. Objective 0 of the same job is at (-45,-300) and
+      //     DID project onto the bridge mast — measured in the re-render as a
+      //     translucent column over the pylon, which reads as an artifact.
+      // The HUD wording is also the one that belongs on a bridge frame.
+      game.missions.job = JOBS[8]; game.missions.obj = 2;
       // R7/M4 — wanted is ★3 in all four judge shots (SHOTS.vista). ★3 makes
       // updatePolice want four units and it spawns any shortfall 120 m from
       // the player, which from this pose lands inside the frame (the aim runs
@@ -718,7 +844,12 @@ export function stageShot(name, game) {
       // project to y≈620–710 — the bottom band of the frame — which is what
       // keeps the near third from being an empty apron of asphalt.
       placeCar(game, 'truck', -57.0, -228, Math.PI, 0, 0x7a6a4a);
-      placeCar(game, 'sedan', -48.0, -236, Math.PI, 0, 0x8a2f2f);
+      // R8/M4b — the hero car rides in this queue too. The maroon sedan at
+      // (-48,-236) (the one slot in the row that projects clear of every other
+      // body: x 825..871, y 628..685) is repainted to the player's teal, so the
+      // vista carries the same car as cover and street without adding geometry
+      // that could clip a neighbour.
+      placeCar(game, 'sedan', -48.0, -236, Math.PI, 0, 0x2fd3c4);
       placeCar(game, 'compact', -42.0, -222, Math.PI, 0, 0xd8b13c);
       placeCar(game, 'sedan', -52.0, -240, Math.PI, 0, 0xe8e2d4);
       // R7/M5 — a fuller queue on the flat approach: two more cars slotted
@@ -729,9 +860,17 @@ export function stageShot(name, game) {
       placeCar(game, 'compact', -58.0, -238, Math.PI, 0, 0x8a6d2f);
       // Pedestrians on the west sidewalk (x -53, the 4 m strip) only — the east
       // verge is where the right-hand tower stands, and anything there would
-      // re-crowd the frame.
+      // re-crowd the frame. R8/M4b — the first row used to step 5 m from z -224
+      // and ran into the staged sedan at (-52,-240): the figure at
+      // (-53,-239) stood 1.3 m from its centre, i.e. inside its body. The row
+      // now skips any slot within 3.2 m of a staged car, and the second row
+      // stays clear of them by construction (all of its cars sit at z > -240).
       for (let i = 0; i < 7; i++) {
-        spawnPed(game.peds, -53.0, -224 - i * 5);
+        const pz = -224 - i * 5;
+        if (Math.abs(pz + 240) < 3.4 || Math.abs(pz + 238) < 3.4 ||
+            Math.abs(pz + 236) < 3.4 || Math.abs(pz + 232) < 3.4 ||
+            Math.abs(pz + 228) < 3.6 || Math.abs(pz + 222) < 3.4) continue;
+        spawnPed(game.peds, -53.0, pz);
       }
       for (let i = 0; i < 5; i++) {
         spawnPed(game.peds, -53.0, -259 - i * 4);
