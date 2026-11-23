@@ -46,7 +46,7 @@ export function panicPeds(pd, x, z, radius) {
     }
   }
 }
-export function updatePeds(pd, dt, player) {
+export function updatePeds(pd, dt, player, cars) {
   pd.spawnT -= dt;
   if (pd.list.length < TARGET && pd.spawnT <= 0) {
     pd.spawnT = 0.25;
@@ -70,6 +70,27 @@ export function updatePeds(pd, dt, player) {
     p.pos.x += Math.sin(p.heading) * p.speed * dt;
     p.pos.z += Math.cos(p.heading) * p.speed * dt;
     resolveCircle(p.pos, 0.4); // sidewalks, not living rooms: stay out of buildings
+    // R8/M4b — cars are solid to a walking ped, and a panicking crowd runs
+    // straight into them. Before this pass a panicking figure could end up
+    // INSIDE a parked cruiser or sedan (measured in the cover and street
+    // frames: ped 2.31 m from a cruiser centre against a 2.75 m combined
+    // radius), which reads as a person growing out of a car roof. No vehicle
+    // model here knows about pedestrians, so the push-out is done once, here,
+    // against the same circle the car's own collision uses (`spec.len / 2`):
+    // the ped is snapped to the outside of that circle instead of being
+    // allowed to overlap it, and keeps walking.
+    if (cars) {
+      for (const v of cars) {
+        const rad = v.spec.len / 2 + 0.4;
+        const dx = p.pos.x - v.pos.x, dz = p.pos.z - v.pos.z;
+        const d2 = dx * dx + dz * dz;
+        if (d2 < rad * rad) {
+          const d = Math.sqrt(d2) || 0.001;
+          p.pos.x = v.pos.x + (dx / d) * rad;
+          p.pos.z = v.pos.z + (dz / d) * rad;
+        }
+      }
+    }
     p.pos.x = clamp(p.pos.x, -355, 355); p.pos.z = clamp(p.pos.z, -445, 265);
     p.pos.y = groundHeight(p.pos.x, p.pos.z, 0.5);
     const swing = Math.sin(performance.now() * 0.01 + i) * clamp(p.speed / 5.5, 0.2, 1) * 0.45;
