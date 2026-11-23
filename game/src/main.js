@@ -224,7 +224,9 @@ function step(dt) {
   }
   sirenOn = g.wanted.stars >= 2;
   updateTraffic(g.traffic, dt, p, sirenOn);
-  updatePeds(g.peds, dt, p);
+  // Cars are passed in so a ped cannot walk into a parked body (see updatePeds).
+  const solidCars = g.cars.concat(g.traffic.cars.map((c) => c.v));
+  updatePeds(g.peds, dt, p, solidCars);
   // Police "near" for the wanted cooldown: cruisers, on-foot officers, and
   // the helicopter all keep eyes on the player.
   const policeNear = g.police.cars.some((u) => Math.hypot(u.v.pos.x - p.pos.x, u.v.pos.z - p.pos.z) < 60)
@@ -430,6 +432,14 @@ if (SHOT) {
     g.wanted.heat = g.shotWanted.heat;
     g.wanted.stars = g.shotWanted.stars;
   }
+  // R8/M4a — a shot is a posed frame, not a session: the steps above really
+  // run the damage paths (street takes a police hit worth 18), so a judge shot
+  // could show 82 health purely because of its step count. Reset the vitals in
+  // the same place the wanted level is reset — shot path only; live play keeps
+  // whatever the player earned.
+  g.player.health = 100;
+  g.player.armor = 0;
+  g.player.stamina = 100;
   if (g.camOverride) {
     camera.position.set(g.camOverride.pos.x, g.camOverride.pos.y, g.camOverride.pos.z);
     camera.lookAt(g.camOverride.look.x, g.camOverride.look.y, g.camOverride.look.z);
