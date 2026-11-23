@@ -12,9 +12,23 @@ import * as THREE from 'three';
 import { CITY, DISTRICTS, PALETTE } from '../config.js';
 import { makeRng, pick, range, clamp } from '../random.js';
 import { addBox, addOccluderCylinder } from '../physics/collision.js';
+import { groundHeight, onRoad } from './roads.js';
 
 const VX = [-315, -225, -135, -45, 45, 135, 225, 315];
 const HZ = [-405, -225, -135, -45, 45, 135, 225];
+// Palm keep-outs: props.js street furniture (billboards with a 10 m face, bus
+// shelters) and the later-built factory yard. Everything else the palms must
+// dodge (buildings, kiosks) is already in `built` / `kioskSpots` by the time
+// the palm block runs, so only these need hard-coded boxes.
+const PALM_NO_PLANT = [
+  // billboards: [-58,-180], [-32,-90], [-58,60], [-32,150], [58,-90]
+  [-64, -182, -52, -178], [-38, -92, -26, -88], [-64, 58, -52, 62],
+  [-38, 148, -26, 152], [52, -92, 64, -88],
+  // bus shelters on the west verge, z -180, -45, 90, 180 (x -56..-52)
+  [-58, -183, -50, -177], [-58, -48, -50, -42], [-58, 87, -50, 93], [-58, 177, -50, 183],
+  // factory: hall, chimney, two silos
+  [173, -55, 221, -25], [231, -63, 241, -53], [174, -76, 198, -64],
+];
 const matCache = new Map();
 function mat(color, opts = {}) {
   const key = color + JSON.stringify(opts);
@@ -625,31 +639,33 @@ export function buildCity(scene, rng) {
     }
   }
 
-  // Palms along the boulevard and scattered in blocks (instanced).
-  // R7: the crown is no longer a squashed icosahedron (a green blob). Each
-  // palm is a tapered, curving trunk with 8-9 drooping fronds fanned around
-  // its tip, all still instanced: one draw call for every trunk in the city
-  // and two for every frond (two droop variants), so 74 palms cost 3 draws
-  // and 3 shadow-batch entries — no lights, no extra shadow maps.
-  const palmSpots = [];
-  for (let z = -240; z <= 240; z += 30) { palmSpots.push([-45 - 10, z]); palmSpots.push([-45 + 10, z + 15]); }
-  for (let i = 0; i < 40; i++) palmSpots.push([range(rng, -340, 340), range(rng, -260, 250)]);
-  // Separate stream for the plant's own shape, so adding detail here cannot
-  // shift the build RNG that the bridge, port and factory downstream of this
-  // block are generated from (their layout must not move).
+  // ---- Palms -----------------------------------------------------------
+  // R8/M2. The plant's own random stream is separate from `rng` so nothing
+  // downstream (bridge, port, factory) can shift when this block changes.
+  //
+  // Placement is now checked, not guessed: the old block dropped 40 palms at
+  // random x/z with no filter and 25 of 74 landed in a lane, on a kerb, on the
+  // bridge ramp or inside a building. Every base here must sit on the flat
+  // slab, at least PALM_CLEAR from any road centre line (1.5 m outside
+  // onRoad's 7 m test), outside a footprint and outside a kiosk.
   const prng = makeRng(0x5eed17);
-  // Trunk: swept tube, 8 sides, curved. Local space is built TIP-AT-ORIGIN
-  // (y 0 down to -1, base drifting `PALM_LEAN` in +x) so an instance placed at
-  // (x, h, z) puts the tip exactly at (x, h, z) and the base on the ground —
-  // the frond ring can then be attached to that same point with zero search.
   const PALM_SIDES = 8, PALM_STATIONS = 7, PALM_LEAN = 0.62;
+  const PALM_R_TIP = 0.135, PALM_R_BASE = 0.45;  // base 3.3x the old 0.26
+  const PALM_CLEAR = 8.5, PALM_SPACING = 5.2;
+
+  // Trunk: swept tube, 8 sides, curved, TIP-AT-ORIGIN (y 0 down to -1, base
+  // drifting PALM_LEAN in +x) so an instance at (x, groundY + h, z) puts the
+  // tip at (x, groundY + h, z) and the base exactly on the ground.
   function palmTrunkGeometry() {
     const pos = [], idx = [];
     for (let i = 0; i < PALM_STATIONS; i++) {
       const u = i / (PALM_STATIONS - 1);            // 0 = tip, 1 = base
       const y = -u;
       const cx = PALM_LEAN * Math.pow(u, 1.6);       // gentle, mostly upper bend
-      const r = (0.135 + 0.125 * u) * (1 + 0.05 * Math.sin(u * 7.0));
+      // Steep taper with a real basal flare: 0.135 at the crown, 0.45 m at the
+      // foot, most of the thickening packed into the bottom third.
+      const r = (PALM_R_TIP + (PALM_R_BASE - PALM_R_TIP) * Math.pow(u, 1.7))
+        * (1 + 0.04 * Math.sin(u * 7.0));
       for (let k = 0; k < PALM_SIDES; k++) {
         const a = (k / PALM_SIDES) * Math.PI * 2;
         pos.push(cx + Math.cos(a) * r, y, Math.sin(a) * r);
@@ -670,20 +686,15 @@ export function buildCity(scene, rng) {
     geo.setIndex(idx); geo.computeVertexNormals();
     return geo;
   }
-  // Frond: unit-length blade along +x. The profile rises off the crown then
-  // falls away (apex near the middle), so the tip really droops; the outline
-  // is scalloped leaflet-by-leaflet and the cross-section is folded into a
-  // steep V (rib low, edges up) — that is what stops it reading as a flat
-  // paddle. `droop` is how far the tip falls at a 1 m frond (×3 m length).
+  // Frond: unit-length blade along +x, apex near the middle then a linear
+  // fall, so the tip genuinely hangs. Scalloped leaflet outline, V-folded
+  // cross-section. `droop` is how far the tip drops at a 1 m frond.
   function palmFrondGeometry(droop) {
     const NS = 15, pos = [], idx = [];
     for (let i = 0; i < NS; i++) {
       const s = i / (NS - 1);
-      // Apex around s 0.35, then a linear fall: an arc, not a straight ramp.
       const y = 0.34 * s - droop * s * s;
-      // Sheath at the base, full blade past a third, needle point at the tip.
       const base = Math.sin(Math.PI * Math.pow(0.06 + 0.94 * s, 0.62));
-      // Alternate long/short leaflets: the sawtooth silhouette of a pinnate frond.
       const w = Math.max(0.022, 0.105 * base * (i % 2 ? 1.0 : 0.52));
       const dip = Math.min(w * 0.9, 0.075);
       pos.push(s, y - dip, -w, s, y, 0, s, y - dip, w);
@@ -698,64 +709,172 @@ export function buildCity(scene, rng) {
     geo.setIndex(idx); geo.computeVertexNormals();
     return geo;
   }
+  // Planting pad: one instanced disc per palm carrying a dark soil ring plus
+  // the soft contact shadow, painted into a single radial gradient. Same trick
+  // the cars use (a dark blob just above the road at y 0.06) — no shadow-map
+  // sample, no light, one extra draw call for all 70-odd palms.
+  function palmPadTexture() {
+    const c = document.createElement('canvas'); c.width = 128; c.height = 128;
+    const g = c.getContext('2d');
+    const grd = g.createRadialGradient(64, 64, 0, 64, 64, 64);
+    grd.addColorStop(0.00, 'rgba(52,38,24,0.80)');
+    grd.addColorStop(0.34, 'rgba(46,34,22,0.72)');
+    grd.addColorStop(0.60, 'rgba(30,24,18,0.34)');
+    grd.addColorStop(1.00, 'rgba(20,18,16,0.00)');
+    g.fillStyle = grd; g.beginPath(); g.arc(64, 64, 64, 0, Math.PI * 2); g.fill();
+    // A few darker flecks so the pad reads as loose earth, not a vinyl disc.
+    g.fillStyle = 'rgba(24,16,10,0.55)';
+    const pr2 = makeRng(0x7a1d);
+    for (let i = 0; i < 26; i++) {
+      const a = pr2() * Math.PI * 2, rr = 12 + pr2() * 32;
+      g.beginPath(); g.arc(64 + Math.cos(a) * rr, 64 + Math.sin(a) * rr, 1.5 + pr2() * 3.2, 0, Math.PI * 2); g.fill();
+    }
+    const tex = new THREE.CanvasTexture(c);
+    tex.colorSpace = THREE.SRGBColorSpace;
+    return tex;
+  }
+
+  // Candidate anchors: the two boulevard rows plus 40 scattered. An anchor is
+  // the BASE of a trunk (the point that must touch ground), not its tip.
+  // The scattered coordinates are drawn from the MAIN stream on purpose: this
+  // block has always consumed 80 rng() calls here and 74 for the heights, and
+  // the bridge/port/factory downstream depend on that stream staying put.
+  const candidates = [];
+  for (let z = -240; z <= 240; z += 30) { candidates.push([-45 - 10, z, true]); candidates.push([-45 + 10, z + 15, true]); }
+  for (let i = 0; i < 40; i++) candidates.push([range(rng, -340, 340), range(rng, -260, 250), false]);
+  // Heights: one rng() per candidate, exactly as before.
+  for (const c of candidates) c.push(range(rng, 6.8, 10.8));
+
+  const palmBlocked = (x, z) => {
+    for (const vx of VX) if (Math.abs(x - vx) < PALM_CLEAR) return true;
+    for (const hz of HZ) if (Math.abs(z - hz) < PALM_CLEAR) return true;
+    // Flat slab only: rejects the deck, both ramps, the river and the mud ford.
+    if (Math.abs(groundHeight(x, z, 0.5)) > 0.05) return true;
+    // The ramp's south toe is at z=-240 where groundHeight is still 0 but the
+    // ramp slab and its parapet already stand there, so keep the whole
+    // approach footprint clear on both sides of the boulevard.
+    if (x > -62 && x < -28 && z > -392 && z < -236) return true;
+    for (const b of built) {
+      if (Math.abs(x - b.bx) < b.w / 2 + 2.0 && Math.abs(z - b.bz) < b.dep / 2 + 2.0) return true;
+    }
+    for (const s of kioskSpots) if (Math.abs(x - s[0]) < 4.2 && Math.abs(z - s[1]) < 4.2) return true;
+    // Static keep-outs for structures built after this block (factory yard)
+    // and for street furniture from props.js that has no footprint in `built`:
+    // billboards (10 m face) and bus-stop shelters on the boulevard verges.
+    for (const [x0, z0, x1, z1] of PALM_NO_PLANT) if (x > x0 && x < x1 && z > z0 && z < z1) return true;
+    for (const p of placed) if (Math.hypot(x - p.x, z - p.z) < PALM_SPACING) return true;
+    if (Math.abs(x) > 344 || z < -252 || z > 262) return true;
+    return false;
+  };
+  const placed = [];
+  for (const [cx, cz, isBlvd, h] of candidates) {
+    let ax = null, az = null;
+    if (isBlvd) {
+      // Walk the row in 3 m bites (0, +3, -3, +6, -6 …) until it clears a
+      // junction, a kiosk or a footprint. Deterministic, so the row stays
+      // straight and the same seed always lands in the same place.
+      for (let t = 0; t <= 11 && ax === null; t++) {
+        const step = Math.ceil(t / 2) * 3.0 * (t % 2 ? -1 : 1);
+        if (!palmBlocked(cx, cz + step)) { ax = cx; az = cz + step; }
+      }
+    } else {
+      // Rejection sampling on the plant stream: a blocked scatter palm is
+      // re-drawn from the same distribution, never clamped into a wall.
+      for (let t = 0; t < 90 && ax === null; t++) {
+        const x = t === 0 ? cx : range(prng, -340, 340);
+        const z = t === 0 ? cz : range(prng, -250, 250);
+        if (!palmBlocked(x, z)) { ax = x; az = z; }
+      }
+    }
+    if (ax !== null) placed.push({ x: ax, z: az, h });
+  }
+
   const trunkGeo = palmTrunkGeometry();
-  const frondGeos = [palmFrondGeometry(0.55), palmFrondGeometry(0.95)];
+  // Three droop variants at most: 0.55 (gentle), 0.95 (arched), 1.32 (a real
+  // hanging tip). More variants would cost draws without reading differently.
+  const frondGeos = [palmFrondGeometry(0.55), palmFrondGeometry(0.95), palmFrondGeometry(1.32)];
   const trunks = new THREE.InstancedMesh(trunkGeo,
     // White base colour: instance colours multiply with it, so the per-palm
     // brown shades must be the instance colour, not a second tint on top.
-    new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 1 }), palmSpots.length);
+    new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 1 }), Math.max(1, placed.length));
   trunks.name = 'palmTrunks';
   const m4 = new THREE.Matrix4(), q = new THREE.Quaternion(), qy = new THREE.Quaternion();
-  const qz = new THREE.Quaternion(), s = new THREE.Vector3(), v = new THREE.Vector3();
+  const qz = new THREE.Quaternion(), qx = new THREE.Quaternion();
+  const s = new THREE.Vector3(), v = new THREE.Vector3();
   const tip = new THREE.Vector3(), tipLocalAxis = new THREE.Vector3(0, 0, 1);
   const spinAxis = new THREE.Vector3(0, 1, 0);
-  const frondX = [], frondMat = [], frondCol = [], tips = [];
+  const frondX = [], frondMat = [], frondCol = [], tips = [], pads = [];
   const col = new THREE.Color();
-  palmSpots.forEach(([x, z], i) => {
-    const h = range(rng, 6.5, 10.5);
-    // The trunk's tip is the instance position: the base lands on the ground
-    // and every frond springs from exactly this point.
-    addOccluderCylinder(x, z, 0.4, 0, h + 0.5);
-    // Yaw about Y only — the trunk's lean is baked along +x, so a yaw turns
-    // the whole plant upright-in-place instead of tipping it over.
-    q.setFromAxisAngle(spinAxis, prng() * Math.PI * 2);
-    m4.compose(new THREE.Vector3(x, h, z), q, s.set(1, h, 1));
+  placed.forEach(({ x, z, h }, i) => {
+    const groundY = groundHeight(x, z, 0.5);
+    // Yaw about Y only — the lean is baked along +x, so a yaw turns the plant
+    // in place instead of tipping it over. The trunk's foot is the anchor, so
+    // the tip is the anchor pushed back along the lean.
+    const yaw = prng() * Math.PI * 2;
+    const tx = x - PALM_LEAN * Math.cos(yaw);
+    const tz = z + PALM_LEAN * Math.sin(yaw);
+    q.setFromAxisAngle(spinAxis, yaw);
+    m4.compose(new THREE.Vector3(tx, groundY + h, tz), q, s.set(1, h, 1));
     trunks.setMatrixAt(i, m4);
     trunks.setColorAt(i, col.setHex(0x6b4a2a).offsetHSL(0, 0, (prng() - 0.5) * 0.12));
-    tip.set(x, h, z);
-    tips.push({ x, y: h, z });
-    // 8-9 fronds around the tip, uneven in azimuth, pitch and length.
-    const nf = 8 + (prng() < 0.5 ? 1 : 0);
+    // Occluder follows the new footprint: 0.45 m of trunk from the soil up.
+    addOccluderCylinder(x, z, PALM_R_BASE, groundY, groundY + h + 0.5);
+    tip.set(tx, groundY + h, tz);
+    tips.push({ x: tx, y: groundY + h, z: tz });
+    // Planting pad under the foot, 6.5 cm up so it clears the sidewalk (0.04).
+    qx.setFromAxisAngle(new THREE.Vector3(1, 0, 0), -Math.PI / 2);
+    m4.compose(new THREE.Vector3(x, groundY + 0.065, z), qx, s.set(1.25, 1.25, 1));
+    pads.push(m4.clone());
+    // 10-14 fronds: azimuth, pitch and length all vary, so no two crowns are
+    // the same star. Fronds on a verge palm are kept shorter so no blade ever
+    // reaches across the asphalt (nearest road centre line minus 3 m).
+    let clr = Infinity;
+    for (const vx of VX) clr = Math.min(clr, Math.abs(x - vx));
+    for (const hz of HZ) clr = Math.min(clr, Math.abs(z - hz));
+    const maxLen = clr < 13 ? 2.9 : 3.35;
+    const nf = 10 + Math.floor(prng() * 5);       // 10..14
     for (let f = 0; f < nf; f++) {
-      const az = (f / nf) * Math.PI * 2 + (prng() - 0.5) * 0.5;
-      const tilt = -0.28 + prng() * 0.85;         // down-swept to near-level
-      const len = 2.55 + prng() * 0.95;
-      qy.setFromAxisAngle(new THREE.Vector3(0, 1, 0), az);
+      const az = (f / nf) * Math.PI * 2 + (prng() - 0.5) * 0.55;
+      const tilt = -0.30 + prng() * 0.92;         // down-swept to near-level
+      const len = 2.35 + prng() * (maxLen - 2.35);
+      qy.setFromAxisAngle(spinAxis, az);
       qz.setFromAxisAngle(tipLocalAxis, tilt);
       qy.multiply(qz);
-      // Root sits 8 cm inside the trunk top: no gap, no visible pivot.
-      v.set(0, -0.08, 0).applyQuaternion(qy).add(tip);
+      // Root sits 12 cm inside the crown: no gap, no visible pivot.
+      v.set(0, -0.12, 0).applyQuaternion(qy).add(tip);
       m4.compose(v, qy, s.set(len, len, len));
-      frondX.push(f & 1); frondMat.push(m4.clone());
+      // Droop variant cycles so all three shapes appear in every crown.
+      const varIdx = f % 3;
+      frondX.push(varIdx); frondMat.push(m4.clone());
       frondCol.push(col.setHex(0x3a8a42).offsetHSL((prng() - 0.5) * 0.05,
         0, (prng() - 0.5) * 0.20).getHex());
     }
   });
-  const perVar = [[], []];
+  trunks.count = placed.length;
+  const perVar = [[], [], []];
   frondMat.forEach((m, i) => perVar[frondX[i]].push([m, frondCol[i]]));
   const frondMeshes = perVar.map((list, k) => {
     const mesh = new THREE.InstancedMesh(frondGeos[k],
       new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.85, side: THREE.DoubleSide }),
       Math.max(1, list.length));
-    mesh.name = 'palmFronds' + (k ? 'B' : 'A');
+    mesh.name = 'palmFronds' + 'ABC'[k];
     list.forEach(([m, c], i) => { mesh.setMatrixAt(i, m); mesh.setColorAt(i, col.setHex(c)); });
     mesh.count = list.length;
     return mesh;
   });
+  const padMesh = new THREE.InstancedMesh(new THREE.CircleGeometry(1, 14),
+    new THREE.MeshBasicMaterial({
+      map: palmPadTexture(), color: 0xffffff, transparent: true,
+      depthWrite: false, polygonOffset: true, polygonOffsetFactor: -3, polygonOffsetUnits: -3,
+    }), Math.max(1, pads.length));
+  padMesh.name = 'palmPads';
+  pads.forEach((m, i) => padMesh.setMatrixAt(i, m));
+  padMesh.count = pads.length;
+  padMesh.renderOrder = 2;
   trunks.castShadow = true;
   for (const f of frondMeshes) f.castShadow = true;
   trunks.userData.tips = tips;
-  scene.add(trunks, ...frondMeshes);
+  scene.add(trunks, ...frondMeshes, padMesh);
   // Lamps along roads (instanced poles + heads; heads glow at night).
   const lampSpots = [];
   for (const x of VX) for (let z = -440; z <= 260; z += 45) lampSpots.push([x + 7, z]);
@@ -932,10 +1051,14 @@ function buildBridge(scene, rng, lamps) {
   for (const z of [-270, -315, -360]) {
     const x = curveX(z);
     const h = DECK_BOT + 3;
-    const pier = new THREE.Mesh(new THREE.BoxGeometry(6, h, 4), concrete);
+    // R8/M1: the mid pier carries the pylon, so it is wider (8 m) and
+    // deeper (6 m) than the abutment piers, with a wider cap — the pylon's
+    // foundation reads continuously from the riverbed to the deck.
+    const mid = z === -315;
+    const pier = new THREE.Mesh(new THREE.BoxGeometry(mid ? 8 : 6, h, mid ? 6 : 4), concrete);
     pier.position.set(x, -3 + h / 2, z);
     pier.castShadow = true; pier.receiveShadow = true; group.add(pier);
-    const cap = new THREE.Mesh(new THREE.BoxGeometry(7.6, 0.6, 5), concrete);
+    const cap = new THREE.Mesh(new THREE.BoxGeometry(mid ? 9.6 : 7.6, 0.6, mid ? 7 : 5), concrete);
     cap.position.set(x, DECK_BOT - 0.3, z); group.add(cap);
   }
   // Deck lighting. The boulevard's lamps never reach the span: lampSpots only
@@ -981,30 +1104,61 @@ function buildBridge(scene, rng, lamps) {
       group.add(head);
     }
   }
-  // Single asymmetric pylon, leaning like a sail, 70 m tall.
-  const PYLON_X = CITY.bridgeX - 4, PYLON_Z = -315, LEAN = 0.12;
-  const pylon = new THREE.Mesh(new THREE.CylinderGeometry(1.6, 3.2, 70, 8), white);
-  pylon.position.set(PYLON_X, CITY.bridgeY + 35, PYLON_Z); pylon.rotation.z = LEAN;
+  // R8/M1: cable-stayed pylon, re-founded. BEFORE (measured):
+  //   axis (-49, 41), LEAN 0.12 (6.9 deg), r 1.6/3.2, base-cap centre
+  //   (-44.81, 6.25) — rel -7.81 m from the deck centre, i.e. IN the west
+  //   outer traffic lane (lanes: W outer -13..-6.5, W inner -6.5..-1.4,
+  //   E inner +1.4..+5.5, E outer +6.5..+13), 7.81 m off the mid pier
+  //   (pier x -40..-34), leaning like it is about to fall, with no visible
+  //   foundation. AFTER: the pylon stands in the deck median on a concrete
+  //   plinth over the widened mid pier, nearly upright (2.9 deg), thicker,
+  //   with stay fans to BOTH deck edges as well as the centre fan.
+  const PYLON_Z = -315, LEAN = 0.05;
+  const PLINTH_TOP = DECK_TOP + 1.6; // 8.2
+  // Concrete plinth: the pylon's visible foundation on the deck, 8.6 m wide
+  // (median island, rel -4.3..+4.3) x 10 m long, top at 8.2.
+  const plinth = new THREE.Mesh(new THREE.BoxGeometry(8.6, 1.6, 10), concrete);
+  plinth.position.set(curveX(PYLON_Z), DECK_TOP + 0.8, PYLON_Z);
+  plinth.castShadow = true; plinth.receiveShadow = true; group.add(plinth);
+  // Axis X is offset west so that, once the lean is applied, the base-cap
+  // centre lands exactly on the deck centreline (-37, 8.2): the base disc
+  // (r 3.6) then sits wholly on the plinth with 0.7 m to spare each side,
+  // its lowest edge 0.18 m embedded in the plinth top — planted, not floating.
+  const PYLON_X = curveX(PYLON_Z) - 35 * Math.sin(LEAN);
+  const pylon = new THREE.Mesh(new THREE.CylinderGeometry(2.0, 3.6, 70, 10), white);
+  pylon.position.set(PYLON_X, PLINTH_TOP + 35 * Math.cos(LEAN), PYLON_Z);
+  pylon.rotation.z = LEAN;
   pylon.castShadow = true; group.add(pylon);
   // The pylon has no collision box; the camera needs it as a cylinder
-  // (radius covers the lean, y from the deck to the top).
-  addOccluderCylinder(PYLON_X, PYLON_Z, 3.4, CITY.bridgeY, 76);
+  // (radius covers the base disc's furthest reach from the axis,
+  // 3.6 + 35*sin(LEAN) = 5.35, y from the deck to the top).
+  addOccluderCylinder(PYLON_X, PYLON_Z, 5.6, CITY.bridgeY, 76);
   // Amber beacon band near the top, so the bridge reads at dusk too.
-  const band = new THREE.Mesh(new THREE.CylinderGeometry(1.75, 1.85, 1.4, 8),
+  // Radius follows the taper (~2.11 at local y=+30), so the band sits proud.
+  const band = new THREE.Mesh(new THREE.CylinderGeometry(2.25, 2.35, 1.4, 10),
     new THREE.MeshStandardMaterial({ color: 0xf5a623, emissive: 0x7a4a00, emissiveIntensity: 0.9, roughness: 0.5 }));
   band.position.y = 30; pylon.add(band);
-  // Cable fan: 16 stays anchored at the pylon's real top (the cylinder leans
-  // by LEAN, so the tip sits 35*sin(LEAN) west of its axis) down to the deck
-  // surface. The old code placed the top 70*LEAN east instead, leaving the
-  // whole fan hanging in mid-air beside the pylon.
-  const topX = PYLON_X - 35 * Math.sin(LEAN), topY = CITY.bridgeY + 35 + 35 * Math.cos(LEAN);
-  const pts = [];
+  // Stay fans from the pylon's real top (the cylinder leans by LEAN, so the
+  // tip sits 35*sin(LEAN) west of its axis) down to the deck surface.
+  const topX = PYLON_X - 35 * Math.sin(LEAN), topY = PLINTH_TOP + 70 * Math.cos(LEAN);
+  const stayPts = [];
+  const stay = (ax, ay, az) => {
+    stayPts.push(new THREE.Vector3(topX, topY, PYLON_Z));
+    stayPts.push(new THREE.Vector3(ax, ay, az));
+  };
+  // Centre fan: 16 stays along the median, as before.
   for (let i = 0; i < 16; i++) {
     const z = -271 - (88 * i) / 15;
-    pts.push(new THREE.Vector3(topX, topY, PYLON_Z));
-    pts.push(new THREE.Vector3(curveX(z), DECK_TOP, z));
+    stay(curveX(z), DECK_TOP, z);
   }
-  const cableGeo = new THREE.BufferGeometry().setFromPoints(pts);
+  // Side fans: 8 stays each to the west and east parapet lines, so the
+  // pylon is stayed to both sides of the deck, not in one plane only.
+  for (let i = 0; i < 8; i++) {
+    const z = -276 - (78 * i) / 7;
+    stay(curveX(z) - 11.5, DECK_TOP, z);
+    stay(curveX(z) + 11.5, DECK_TOP, z);
+  }
+  const cableGeo = new THREE.BufferGeometry().setFromPoints(stayPts);
   group.add(new THREE.LineSegments(cableGeo, new THREE.LineBasicMaterial({ color: 0xffffff })));
   scene.add(group);
 }
@@ -1033,7 +1187,18 @@ function buildPort(scene, rng) {
   // Market stalls with striped awnings along the riverbank promenade. Each
   // stall carries a painted name board on its promenade face and a lit tube
   // under the awning — the row reads as a market, not as plain brown boxes.
-  const STALLS = ['IKAN SEGAR', 'UDANG BASAH', 'KERUPUK', 'ES SERUT', 'SAYUR PAGI', 'BUMBU DAPUR', 'IKAN ASIN', 'KERANG'];
+  // R8/M3 — every stall on this row must be a FISH stall, because the row is
+  // the one the dialog shot stages against and findFishStall() in shots.js
+  // picks a stall by body geometry alone, not by its board. The old list held
+  // KERUPUK / ES SERUT / SAYUR PAGI / BUMBU DAPUR, i.e. four of eight entries
+  // were not fish, and the dialog frame came back with "BUMBU DAPUR" painted
+  // over a counter of iced fish and a HARGA / IKAN / UDANG board. The list is
+  // now all sea produce, so whichever stall the geometry match lands on is a
+  // fish kiosk. Same length (8) and same single pick() per stall, so the RNG
+  // stream — and every other shot that depends on it — is untouched; slot 0
+  // keeps IKAN SEGAR and slot 5 — the one findFishStall() actually resolves to
+  // for the dialog — is IKAN SEGAR too, so the staged board reads IKAN SEGAR.
+  const STALLS = ['IKAN SEGAR', 'UDANG BASAH', 'IKAN ASIN', 'KERANG', 'TONGKOL', 'IKAN SEGAR', 'KEPITING', 'BANDENG'];
   const stripPairs = [['#e0453a', '#f2ede2'], ['#2fd3c4', '#0e1a22'], ['#f5a623', '#e8e4d8']];
   for (let i = 0; i < 12; i++) {
     const x = range(rng, -320, 320), z = -262 + (rng() < 0.5 ? -2 : 2);
