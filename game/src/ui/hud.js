@@ -57,7 +57,13 @@ export function updateHud(g, dt) {
   const pct = Math.round(g.tide.t * 100);
   els.tideFill.style.height = pct + '%';
   els.tidePct.textContent = pct + '%';
-  els.tideLabel.textContent = g.tide.t >= 0.75 ? 'PASANG' : g.tide.t <= 0.35 ? 'SURUT' : 'TENANG';
+  // A live chase never reads TENANG: the 0.35–0.75 slack band is exactly where
+  // a mid tide sits, and "calm water" under three wanted stars is a lie. While
+  // wanted is up the word splits at the midpoint instead; with no wanted the
+  // original near/far thresholds stand.
+  els.tideLabel.textContent = g.wanted.stars > 0
+    ? (g.tide.t >= 0.5 ? 'PASANG' : 'SURUT')
+    : g.tide.t >= 0.75 ? 'PASANG' : g.tide.t <= 0.35 ? 'SURUT' : 'TENANG';
   els.tideArrow.textContent = g.tideRising ? '▲' : '▼';
   const kmh = Math.round((p.mode === 'driving' && p.car ? Math.abs(p.car.speed) : p.speed) * 3.6);
   els.speedNum.textContent = kmh;
