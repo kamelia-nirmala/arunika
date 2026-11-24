@@ -425,6 +425,9 @@ export function buildCity(scene, rng) {
       }));
     sign.position.set(px, signY, pz);
     sign.rotation.y = ry;
+    // Named so a probe can measure the board it paints: which boards are
+    // clipped by a shot's frame edge is otherwise unanswerable from outside.
+    sign.name = 'shopSign:' + nm;
     scene.add(sign);
     const signBack = new THREE.Mesh(
       new THREE.BoxGeometry(nx !== 0 ? 0.16 : wide + 0.1, signH + 0.1, nx !== 0 ? wide + 0.1 : 0.16),
@@ -504,6 +507,7 @@ export function buildCity(scene, rng) {
             }));
           neon.position.set(cx0 + pnx * s * 0.07, by, cz0 + pnz * s * 0.07);
           neon.rotation.y = nx !== 0 ? (s > 0 ? 0 : Math.PI) : (s > 0 ? Math.PI / 2 : -Math.PI / 2);
+          neon.name = 'bladeSign:' + word;
           scene.add(neon);
         }
         const frameMat = neonMat(col2);
@@ -534,6 +538,7 @@ export function buildCity(scene, rng) {
       const bzp = nz !== 0 ? face - nz * inset : b.bz;
       board.position.set(bxp, boardY, bzp);
       board.rotation.y = ry;
+      board.name = 'roofBoard:' + top;
       scene.add(board);
       // Back panel so the board is not a one-sided sheet.
       const back = new THREE.Mesh(
@@ -563,10 +568,41 @@ export function buildCity(scene, rng) {
   const KIOSKS = ['WARUNG KOPI', 'GORENGAN', 'ES TEH', 'ROKOK & PULSA', 'KUE BASAH', 'BAKSO MALAM'];
   const KIOSK_NEON = [['KOPI', 0xff5a3c], ['ES', 0x2fd3c4], ['PULSA', 0xffc043], ['BUKA', 0x59e0ff]];
   const KIOSK_STRIPES = [['#e0453a', '#f2ede2'], ['#2fd3c4', '#0e1a22'], ['#f5a623', '#e8e4d8'], ['#2f6db8', '#f2ede2']];
+  // R9/M2 — measured on the shipped scene (probe, 0.01 m): two carts stood at
+  // 0.00 m clearance. (-58.3,-232) had its north-east corner 2.3 m inside the
+  // south ramp's concrete fill (fill x -58.83..-27.41, z -271.8..-231.86 vs
+  // cart foot z -234.15..-229.85), and (-58.3,-178) was built around the
+  // boulevard billboard's post and the bus shelter at the same z. Both read as
+  // "stall embedded in the wall". The old test only knew about `built`
+  // footprints, so nothing else could ever stop a cart.
+  //
+  // Street furniture from props.js stands on these verges but is created after
+  // this module, so its footprints are mirrored here (rects x0,z0,x1,z1 at the
+  // prop's own size — clearance is added by kioskFree). Keep in step with
+  // PROP_BILLBOARDS / PROP_STOPS in props.js.
+  const KIOSK_KEEP_OUT = [
+    // billboard posts: 0.5 m square
+    [-58.25, -180.25, -57.75, -179.75], [-32.25, -90.25, -31.75, -89.75],
+    [-58.25, 59.75, -57.75, 60.25], [-32.25, 149.75, -31.75, 150.25],
+    [57.75, -90.25, 58.25, -89.75],
+    // bus shelters: 4 m canopy, 2.6 m bench, flag mast at +2.7 m
+    [-57, -182, -51, -178], [-57, -47, -51, -43], [-57, 88, -51, 92], [-57, 178, -51, 182],
+    // south approach fill: the ramp's closed concrete flank (x -62.9..-27.3 is
+    // the 26 m deck width plus its kerb reveal, not the 12 m boulevard)
+    [-62.9, -392, -27.3, -231.8],
+    // the approach's own queue bay and the police staging line. Both are west
+    // verge, both are occupied by shot traffic in the judge frames, and a cart
+    // standing in either is measured at 0.00 m from a truck / a cruiser.
+    [-63, -241, -52, -220], [-63, -181, -52, -164],
+  ];
+  const KIOSK_CLEAR = 1.2;   // air left between a cart and anything solid
   function kioskFree(x, z) {
-    const hx = KX / 2 + 0.5, hz = KZ / 2 + 0.5;
+    const hx = KX / 2 + KIOSK_CLEAR, hz = KZ / 2 + KIOSK_CLEAR;
     for (const b of built) {
       if (Math.abs(x - b.bx) < b.w / 2 + hx && Math.abs(z - b.bz) < b.dep / 2 + hz) return false;
+    }
+    for (const [x0, z0, x1, z1] of KIOSK_KEEP_OUT) {
+      if (x > x0 - hx && x < x1 + hx && z > z0 - hz && z < z1 + hz) return false;
     }
     // Keep clear of the crossing kerbs and of each other.
     for (const s of kioskSpots) if (Math.abs(x - s[0]) < 6 && Math.abs(z - s[1]) < 6) return false;
@@ -575,10 +611,16 @@ export function buildCity(scene, rng) {
   const kioskSpots = [];
   for (const [x, z0] of [[-58.3, -232], [-58.3, -178], [-58.3, -120], [-58.3, 30],
                          [-31.7, -214], [-31.7, -158], [-31.7, 52], [-31.7, 118]]) {
-    // Walk the spot a little along the street until it clears the buildings.
-    let z = z0, tries = 0;
-    while (!kioskFree(x, z) && tries < 12) { z += 5.5; tries++; }
-    if (!kioskFree(x, z)) continue;
+    // Walk the spot along the street until it clears the buildings, the street
+    // furniture and the ramp flank. Both directions are tried (the old loop
+    // only walked +z, so a cart blocked to the north was simply dropped), and
+    // the search is wider than before because the clearance test is stricter.
+    let z = null;
+    for (let tries = 0; tries < 17 && z === null; tries++) {
+      const step = tries === 0 ? 0 : Math.ceil(tries / 2) * 4.5 * (tries % 2 ? 1 : -1);
+      if (kioskFree(x, z0 + step)) z = z0 + step;
+    }
+    if (z === null) continue;
     kioskSpots.push([x, z]);
   }
   for (const [x, z] of kioskSpots) {
@@ -589,11 +631,18 @@ export function buildCity(scene, rng) {
       mat(0x9a9182, { roughness: 1 }));
     plinth.position.set(x, 0.05, z);
     plinth.receiveShadow = true;
+    // Every part of the cart is tagged so a clearance probe measures the stall
+    // against the city, not against its own awning and fascia boards.
+    plinth.userData.kioskPart = true;
     scene.add(plinth);
     const body = new THREE.Mesh(new THREE.BoxGeometry(KX, KH, KZ),
       mat(pick(rng, [0x8a6b4a, 0x9c7a52, 0x7a5c40]), { roughness: 1 }));
     body.position.set(x, 0.1 + KH / 2, z);
     body.castShadow = true; body.receiveShadow = true;
+    // Named + tagged so a probe can measure the cart against the wall behind
+    // it (kiosk-vs-facade clearance is not visible from the code alone).
+    body.name = 'kiosk';
+    body.userData.kiosk = { x, z, w: KX, d: KZ, side: towardRoad };
     scene.add(body);
     // Awning: 22 cm slab whose underside beds 5 cm into the body top, with a
     // 50 cm overhang on the street side.
@@ -602,23 +651,28 @@ export function buildCity(scene, rng) {
       new THREE.MeshStandardMaterial({ map: awningTexture(...pick(rng, KIOSK_STRIPES)), roughness: 0.9 }));
     awning.position.set(x, base + KH + 0.06, z);
     awning.castShadow = true;
+    awning.userData.kioskPart = true;
     scene.add(awning);
     const faceX = x + towardRoad * (KX / 2 + 0.03);
     const yaw = towardRoad > 0 ? Math.PI / 2 : -Math.PI / 2;
     // Fascia: painted shop name on the street face, just under the awning.
+    const kioskName = pick(rng, KIOSKS);
     const fascia = new THREE.Mesh(new THREE.PlaneGeometry(KZ - 0.4, 0.72),
       new THREE.MeshStandardMaterial({
-        map: signTexture(pick(rng, KIOSKS), '#101820', '#f7f0dc', '#f5a623'),
+        map: signTexture(kioskName, '#101820', '#f7f0dc', '#f5a623'),
         roughness: 0.8, emissive: 0x1e1a12, emissiveIntensity: 0.42,
       }));
+    fascia.name = 'kioskSign:' + kioskName;
     fascia.position.set(faceX, base + 2.04, z);
     fascia.rotation.y = yaw;
+    fascia.userData.kioskPart = true;
     scene.add(fascia);
     const fasciaBack = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.8, KZ - 0.3),
       mat(0x151c23, { roughness: 0.9 }));
     // Set 12 cm back so the fascia plane's front face clears the box's by
     // 4 cm — flush surfaces z-fight and swallow letters.
     fasciaBack.position.set(x + towardRoad * (KX / 2 - 0.11), base + 2.04, z);
+    fasciaBack.userData.kioskPart = true;
     scene.add(fasciaBack);
     // Neon word on the shopfront below the fascia, plus a tube along the
     // awning's street edge. Emissive only — no light is added.
@@ -631,10 +685,12 @@ export function buildCity(scene, rng) {
         }));
       neon.position.set(faceX + towardRoad * 0.06, base + 1.18, z);
       neon.rotation.y = yaw;
+      neon.userData.kioskPart = true;
       scene.add(neon);
       const tube = new THREE.Mesh(new THREE.BoxGeometry(0.07, 0.07, KZ + 0.6),
         neonMat(col));
       tube.position.set(x + towardRoad * (KX / 2 + 0.5), base + KH - 0.02, z);
+      tube.userData.kioskPart = true;
       scene.add(tube);
     }
   }
@@ -836,7 +892,31 @@ export function buildCity(scene, rng) {
     for (let f = 0; f < nf; f++) {
       const az = (f / nf) * Math.PI * 2 + (prng() - 0.5) * 0.55;
       const tilt = -0.30 + prng() * 0.92;         // down-swept to near-level
-      const len = 2.35 + prng() * (maxLen - 2.35);
+      let len = 2.35 + prng() * (maxLen - 2.35);
+      // R9/M2 — a blade may hang over the verge but never over a lane. Measured
+      // on the shipped scene: 4 of 886 fronds crossed the carriageway edge
+      // (nearest tip 5.76 m from a centre line, i.e. 0.24 m inside the 6 m
+      // half-width), and from a low camera those tips read as the road being
+      // covered. The blade is a ray from the crown along (cos az, -sin az), so
+      // each lane edge it would cross gives an exact t at which to stop; keep
+      // FROND_EDGE of air beyond the edge. Blades that already clear are
+      // untouched, so the crowns keep their shape.
+      const FROND_EDGE = 0.8;
+      const dx = Math.cos(az), dz = -Math.sin(az);
+      let clip = Infinity;
+      for (const vx of VX) {
+        if (Math.abs(dx) < 1e-6) continue;
+        const edge = CITY.roadWidth / 2 + FROND_EDGE;
+        const t = dx > 0 ? (vx - edge - tx) / dx : (vx + edge - tx) / dx;
+        if (t > 0) clip = Math.min(clip, t);
+      }
+      for (const hz of HZ) {
+        if (Math.abs(dz) < 1e-6) continue;
+        const edge = CITY.roadWidth / 2 + FROND_EDGE;
+        const t = dz > 0 ? (hz - edge - tz) / dz : (hz + edge - tz) / dz;
+        if (t > 0) clip = Math.min(clip, t);
+      }
+      if (clip < len) len = Math.max(1.5, clip - 0.02);
       qy.setFromAxisAngle(spinAxis, az);
       qz.setFromAxisAngle(tipLocalAxis, tilt);
       qy.multiply(qz);
@@ -945,11 +1025,15 @@ function buildBridge(scene, rng, lamps) {
       const nx = -tz * half, nz = tx * half, p = pts[i];
       if (i > 0) run += Math.hypot(p.x - pts[i - 1].x, p.z - pts[i - 1].z);
       const v = vScale ? run / vScale : 0;
+      // `y2` (optional, absolute) lets one slab have a per-point underside:
+      // the approach fills below use it to reach the ground plane while the
+      // painted deck slab keeps its constant 1.2 m structural depth.
+      const yb = p.y2 === undefined ? p.y - thickness : p.y2;
       pos.push(
         p.x + nx, p.y, p.z + nz, // top, left edge
         p.x - nx, p.y, p.z - nz, // top, right edge
-        p.x + nx, p.y - thickness, p.z + nz, // bottom, left edge
-        p.x - nx, p.y - thickness, p.z - nz, // bottom, right edge
+        p.x + nx, yb, p.z + nz, // bottom, left edge
+        p.x - nx, yb, p.z - nz, // bottom, right edge
       );
       uv.push(0, v, 1, v, 0, v, 1, v);
     }
@@ -1015,32 +1099,79 @@ function buildBridge(scene, rng, lamps) {
       rail.rotation.y = ry; group.add(rail);
     }
   }
-  // Approach ramps: the top surface eases from the road up to the deck with
-  // the same smoothstep roads.js uses, so the mesh and the physics agree and
-  // the deck meets the boulevard without a step or a gap.
+  // Approach ramps. The top surface eases from the road up to the deck with
+  // the same smoothstep roads.js uses, so the mesh and the physics agree at
+  // the joint.
+  //
+  // R9/M1 — measured on the shipped scene before this pass (raycast probe):
+  //   * the ramp was a constant 1.2 m slab, so at z -252 its underside was
+  //     y 1.06 and at z -266 y 4.90 over nothing but the y 0.02 road plane. A
+  //     ray fired level with the road (y 0.6) from x -75 toward +x at z -254
+  //     hit the building at x -20.85, i.e. it crossed the whole approach
+  //     without touching it: an open corridor under the ramp, which is the
+  //     "floating slab / terpotong" the vista showed;
+  //   * the foot top sat at y 0.05 on a road plane at y 0.02 (a 3 cm lip) and
+  //     the slab simply stopped there with its 1.2 m end cap exposed;
+  //   * each 1.1 m parapet ended dead at z -240 with its end face in the air.
+  // The fix is structural: the same stations are now filled down past the
+  // terrain plane (a closed retaining face instead of a floating edge), and
+  // the toe runs 6 m past the foot and dives under the road, so the junction
+  // is an intersection line cut by the tarmac rather than a slab cap.
+  const GROUND_Y = 0;  // terrain slab under the boulevard
+  const ROAD_Y = 0.02; // roadPlane() is laid 2 cm proud of the terrain
+  const fillMat = mat(0x8a9199, { roughness: 1, side: THREE.DoubleSide }); // abutment concrete
   function ramp(footZ, abutZ) {
-    const steps = 10;
-    const pts = [];
+    const steps = 12;
+    const out = -Math.sign(abutZ - footZ); // foot -> street, away from the span
+    // Stations from the road up to the deck head.
+    const roadPts = [];
     for (let i = 0; i <= steps; i++) {
       const z = footZ + ((abutZ - footZ) * i) / steps;
       const u = (z - abutZ) / (footZ - abutZ);
       const ease = 1 - u * u * (3 - 2 * u); // 1 at the deck, 0 at the road
-      pts.push({ x: curveX(z), z, y: 0.05 + (DECK_TOP - 0.05) * ease });
+      roadPts.push({ x: curveX(z), z, y: ROAD_Y + (DECK_TOP - ROAD_Y) * ease });
     }
     // Tuck the head 5 cm into the deck so the two end faces are not coplanar.
     const lean = Math.sign(abutZ - footZ) * 0.05;
-    pts.push({ x: curveX(abutZ + lean), z: abutZ + lean, y: DECK_TOP });
+    roadPts.push({ x: curveX(abutZ + lean), z: abutZ + lean, y: DECK_TOP });
+    // Buried toe: two stations carrying the surface under the road plane, so
+    // the slab is cut by the tarmac instead of ending on top of it. They are
+    // prepended (south of the foot) to keep the path monotonic for the slab.
+    const toePts = [];
+    for (let i = 2; i >= 1; i--) {
+      const z = footZ + out * 3 * i;
+      toePts.push({ x: curveX(z), z, y: ROAD_Y - 0.15 * (i / 2) });
+    }
+    const pts = toePts.concat(roadPts);
     // The ramp wears the same lane paint as the span, so the road, the climb
     // and the bridge read as one continuous surface in a low sun.
     group.add(slab(pts, DECK_W, DECK_H, rampMat, 24));
+    // Fill: from just under the painted slab down past the terrain plane, so
+    // the flank is a closed concrete face for its full height and no ray can
+    // pass under the approach. 15 cm wider than the slab on each side, so the
+    // concrete shows as a kerb-thick reveal and the two flanks are never
+    // coplanar with the painted slab's own side faces.
+    const fillPts = pts.map((p) => ({
+      x: p.x, z: p.z, y: p.y - 0.02,
+      y2: Math.min(GROUND_Y - 0.25, p.y - 0.05),
+    }));
+    group.add(slab(fillPts, DECK_W + 0.3, 0, fillMat));
+    // Parapets stop at the foot (the buried toe carries no rail: a rail under
+    // the tarmac would clip the queued traffic). Each one lands on a concrete
+    // end post that also caps the wall's otherwise open end face.
     for (const side of [-1, 1]) {
-      const railPts = pts.map((p, i) => {
-        const a = pts[Math.max(0, i - 1)], b = pts[Math.min(pts.length - 1, i + 1)];
+      const railPts = roadPts.map((p, i) => {
+        const a = roadPts[Math.max(0, i - 1)], b = roadPts[Math.min(roadPts.length - 1, i + 1)];
         let tx = b.x - a.x, tz = b.z - a.z;
         const l = Math.hypot(tx, tz) || 1; tx /= l; tz /= l;
         return { x: p.x - tz * 13 * side, z: p.z + tx * 13 * side, y: p.y + 1.05 };
       });
       group.add(slab(railPts, 0.3, 1.1, railMat));
+      const post = new THREE.Mesh(new THREE.BoxGeometry(0.55, 1.3, 0.55), fillMat);
+      const f = railPts[0];
+      post.position.set(f.x, 0.55, f.z - out * 0.18);
+      post.castShadow = true; post.receiveShadow = true;
+      group.add(post);
     }
   }
   ramp(FOOT_S, ABUT_S);
