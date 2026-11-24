@@ -10,7 +10,7 @@ import * as THREE from 'three';
 import { VEHICLES } from '../config.js';
 import { clamp, lerp, smooth } from '../random.js';
 import { resolveCircle, circleHit } from './collision.js';
-import { groundHeight, onRoad } from '../world/roads.js';
+import { groundHeight, onRoad, clampToBridgeDeck } from '../world/roads.js';
 
 const wheelGeo = new THREE.CylinderGeometry(0.34, 0.34, 0.24, 10);
 const tireMat = new THREE.MeshStandardMaterial({ color: 0x141414, roughness: 1 });
@@ -240,6 +240,12 @@ export function stepVehicle(v, input, dt, tide) {
   v.vel.x = lerp(v.vel.x, nfX * v.speed, blend);
   v.vel.z = lerp(v.vel.z, nfZ * v.speed, blend);
   v.pos.x += v.vel.x * dt; v.pos.z += v.vel.z * dt;
+  // Parapets: a car (the player's included) that reaches the bridge rail is
+  // held inside the deck instead of driving through the mesh and dropping
+  // 7.3 m into the river. Only engages when the car was already up on the
+  // span, so street driving and the mud ford are untouched.
+  const yOn = v.pos.y;
+  clampToBridgeDeck(v.pos, yOn, s.len / 2);
   v.pos.y = groundHeight(v.pos.x, v.pos.z, tide);
   // Buildings push the car out; the hit kills speed and adds damage.
   const r = s.len / 2;
