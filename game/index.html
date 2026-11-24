@@ -104,6 +104,17 @@
   #enter-prompt.show { opacity: 1; }
   /* The dialog card owns the bottom band: clear the prompt while it is open. */
   #dialog.show ~ #enter-prompt { opacity: 0; }
+  /* The crosshair marks where the shot goes. It is not decoration: it is
+     only visible while the player is aiming (right mouse) or firing (left
+     mouse) on foot, so idle walking has a clean screen. */
+  #crosshair { position: absolute; top: 50%; left: 50%; width: 22px; height: 22px;
+    transform: translate(-50%, -50%); opacity: 0; transition: opacity 0.12s; pointer-events: none; }
+  #crosshair.show { opacity: 0.9; }
+  #crosshair::before, #crosshair::after { content: ''; position: absolute; background: var(--cream);
+    box-shadow: 0 0 2px rgba(0, 0, 0, 0.9); }
+  #crosshair::before { left: 50%; top: 0; width: 2px; height: 100%; margin-left: -1px; }
+  #crosshair::after { top: 50%; left: 0; height: 2px; width: 100%; margin-top: -1px; }
+  #crosshair.hot::before, #crosshair.hot::after { background: var(--amber); }
   #fps { position: absolute; top: 6px; left: 50%; transform: translateX(-50%);
     font-size: 10px; opacity: 0.5; }
 
@@ -186,6 +197,7 @@ window.addEventListener('error', (e) => { window.__ARUNIKA_ERROR__ = String((e &
       <div id="car-cond" class="hide"><span>KONDISI</span><span id="car-label">100%</span><span class="bar"><span id="car-fill"></span></span></div>
     </div>
   </div>
+  <div id="crosshair"></div>
   <div id="toast"></div>
   <div id="dialog"><canvas id="dialog-portrait" width="160" height="160"></canvas><div id="dialog-body"><div id="dialog-name"></div><div id="dialog-role"></div><div id="dialog-text"></div><div id="dialog-prompt"></div></div></div>
   <div id="enter-prompt">TEKAN E — MASUK MOBIL</div>
@@ -196,7 +208,7 @@ window.addEventListener('error', (e) => { window.__ARUNIKA_ERROR__ = String((e &
   <h2>OPEN-WORLD CRIME · KOTA PANTAI TROPIS</h2>
   <p>Raka kembali ke Arunika — dan terseret jaringan penyelundup pelabuhan. Kendarai, curi, kabur, dan atur pasang-surutnya sendiri.</p>
   <button id="btn-start">MAIN</button>
-  <div class="keys">WASD mengemudi / jalan · E masuk &amp; curi mobil · Spasi rem · Shift drift<br>Mouse tembak · Q ganti senjata · R isi ulang · J misi · V radio · M peta · N bisu · P jeda</div>
+  <div class="keys">WASD mengemudi / jalan · E masuk &amp; curi mobil · Spasi rem · Shift drift<br>Klik kiri tembak · Klik kanan bidik · Q ganti senjata · R isi ulang · J misi · V radio · M peta · N bisu · P jeda</div>
 </div>
 <div id="pause-menu" class="screen">
   <h1 style="font-size:44px">JEDA</h1>
