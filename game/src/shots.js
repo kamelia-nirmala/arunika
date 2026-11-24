@@ -917,9 +917,21 @@ export function stageShot(name, game) {
       // running away to the left) and large enough to clear both edges.
       // Result, same probe: 0 clipped boards, worst margins left 232 / right
       // 78 / top 377 / bottom 32 px, up from 1 clipped and 13 px.
+      // R10-G3 — hero car unreadable at that pose: the sedan at (-48,-236)
+      // sits 64 m out almost dead on the view axis (its long axis IS the
+      // sight line), so it projected to 23x31 px — a speck, not a car.
+      // The camera moves to the south-east shoulder (-28,11,-210) and looks
+      // north-west past the queue, so the sedan is seen three-quarter from
+      // its left flank instead of end-on. Measured by projection against the
+      // same anchors: hero sedan 88x62 px at x 556..644, y 618..680 (bottom
+      // margin 40 px); pylon tip y 43 with sky above it; deck far end
+      // (972,460); the Tanjung Mas tower keeps only a 116 px slice at the
+      // right edge (x 1164..1280), narrower than the R6 pose's 228 px.
+      // Nothing else in the staging moves: same queue, same cruisers, same
+      // job/HUD, only the camera pose.
       game.camOverride = {
-        pos: { x: -52.0, y: 22.0, z: -172.0 },
-        look: { x: -88.0, y: 16.0, z: -340.0 }, fov: 60,
+        pos: { x: -28.0, y: 11.0, z: -210.0 },
+        look: { x: -77.0, y: 22.0, z: -282.0 }, fov: 60,
       };
       // Foreground: the queued traffic on the flat approach (the ramp only
       // lifts north of z=-240, and these props are never stepped, so anything
