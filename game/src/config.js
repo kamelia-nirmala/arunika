@@ -47,6 +47,8 @@ export const KEYS = {
   brake: ['Space'], hand: ['ShiftLeft', 'ShiftRight'],
   enter: ['KeyE'], jump: ['KeyF'], sprint: ['ShiftLeft'],
   fire: ['Mouse0'], reload: ['KeyR'], weapon: ['KeyQ'],
+  // Right mouse button = aim only (never fires); see input.js held('aim').
+  aim: ['Mouse2'],
   radio: ['KeyV'], map: ['KeyM'], pause: ['Escape', 'KeyP'],
   mission: ['KeyJ'], horn: ['KeyH'], mute: ['KeyN'],
 };
