@@ -742,26 +742,88 @@ export function buildCity(scene, rng) {
     geo.setIndex(idx); geo.computeVertexNormals();
     return geo;
   }
-  // Frond: unit-length blade along +x, apex near the middle then a linear
-  // fall, so the tip genuinely hangs. Scalloped leaflet outline, V-folded
-  // cross-section. `droop` is how far the tip drops at a 1 m frond.
+  // Frond: a thin rachis carrying FROND_PAIRS pairs of pointed leaflets, unit
+  // length along +x. `droop` is how far the tip drops at a 1 m frond.
+  //
+  // R10/bug7 — this used to be a single ribbon whose outline zig-zagged
+  // (station widths alternating 1.0 / 0.52) with a hard V-fold as its only
+  // cross-section. Half width 0.105 on a 2.35-3.35 m blade is a 0.5-0.7 m
+  // ribbon, i.e. 1-2 px at the 300 px contact sheet, and the sawtooth's
+  // straight segments plus two flat facets read as one green angular card —
+  // exactly the "tajuk hijau datar bersudut" fault. A real coconut crown reads
+  // as a lance ~1.1 m wide on a 3 m blade, and what makes that silhouette is
+  // the leaflets themselves. So the blade is now built out of them: 12 pairs
+  // raked toward the tip, longest a third of the way out and vanishing at the
+  // tip, each bent (mid raised, outer tip drooping) so it keeps a visible
+  // profile from any azimuth instead of disappearing edge-on.
+  const FROND_PAIRS = 13, FROND_SPAN = 0.205;
   function palmFrondGeometry(droop) {
-    const NS = 15, pos = [], idx = [];
+    const NS = 7, pos = [], idx = [], tint = [];
+    const yAt = (s) => 0.34 * s - droop * s * s;
+    // Per-vertex tone: the base of the blade sits in the crown's own shade and
+    // the tip catches light. With 16-20 blades per crown that value ramp is
+    // what separates overlapping fronds at 300 px — plain instance colours
+    // alone leave two crossing blades at the same tone and they merge.
+    const pt = (x, y, z) => {
+      pos.push(x, y, z);
+      const k = 0.70 + 0.38 * Math.max(0, Math.min(1, x));
+      tint.push(k, k, k);
+      return pos.length / 3 - 1;
+    };
+    // Force every triangle to face up, whichever order its corners were given:
+    // the two sides of a leaflet mirror each other, and a mixed winding would
+    // hand computeVertexNormals a normal to fight with.
+    const tri = (a, b, c) => {
+      const ux = pos[b * 3] - pos[a * 3], uz = pos[b * 3 + 2] - pos[a * 3 + 2];
+      const vx = pos[c * 3] - pos[a * 3], vz = pos[c * 3 + 2] - pos[a * 3 + 2];
+      if (uz * vx - ux * vz >= 0) idx.push(a, b, c); else idx.push(a, c, b);
+    };
+    // Rachis: a narrow V so the spine picks up its own shading between fronds.
     for (let i = 0; i < NS; i++) {
-      const s = i / (NS - 1);
-      const y = 0.34 * s - droop * s * s;
-      const base = Math.sin(Math.PI * Math.pow(0.06 + 0.94 * s, 0.62));
-      const w = Math.max(0.022, 0.105 * base * (i % 2 ? 1.0 : 0.52));
-      const dip = Math.min(w * 0.9, 0.075);
-      pos.push(s, y - dip, -w, s, y, 0, s, y - dip, w);
+      const s = i / (NS - 1), y = yAt(s), w = 0.010 + 0.022 * s;
+      pt(s, y - w * 0.7, -w); pt(s, y, 0); pt(s, y - w * 0.7, w);
     }
     for (let i = 0; i < NS - 1; i++) {
       const o = i * 3, n = o + 3;
-      idx.push(o, o + 1, n, n, o + 1, n + 1);             // left half
-      idx.push(o + 1, o + 2, n + 1, n + 1, o + 2, n + 2);  // right half
+      tri(o, o + 1, n); tri(n, o + 1, n + 1);
+      tri(o + 1, o + 2, n + 1); tri(n + 1, o + 2, n + 2);
+    }
+    for (let i = 0; i < FROND_PAIRS; i++) {
+      const s = 0.05 + (0.91 * (i + 0.5)) / FROND_PAIRS;
+      const y = yAt(s);
+      // Lance outline: longest about a third of the way out, nothing at all at
+      // the tip, so the blade tapers to a point instead of a cut edge.
+      const L = FROND_SPAN * Math.sin(Math.PI * Math.pow(0.05 + 0.95 * s, 0.80));
+      if (L < 0.012) continue;
+      // Rake: nearly square at the base, swept forward at the tip.
+      const ang = 1.24 - 0.52 * s;
+      const ca = Math.cos(ang), sa = Math.sin(ang);
+      const bw = 0.005 + L * 0.085;            // half width of the leaflet mid edge
+      // Each leaflet is folded along its own length, not left coplanar with
+      // the rachis: the mid is pushed up and the point drops again, and the
+      // two neighbours alternate which way. A leaflet that is a flat card
+      // shows one flat tone from above and disappears side-on; this folded
+      // one keeps a bright top and a shadowed tip whatever the camera does.
+      const lift = L * 0.52 * (i % 2 ? 1.15 : 0.88);
+      for (const side of [-1, 1]) {
+        // A kite, not a quad: one vertex on the rachis, a wide raised mid edge,
+        // and a point. Two triangles per leaflet instead of three, and the
+        // pointed base leaves the sky gaps that make the blade read as
+        // feathery rather than as one serrated slab.
+        const bse = pt(s, y, 0);
+        // Mid edge runs square to the leaflet, not square to the rachis.
+        const px = -side * sa, pz = ca;
+        const mx = s + ca * L * 0.52, my = y + lift;
+        const mz = side * sa * L * 0.52;
+        const m0 = pt(mx - px * bw * 0.85, my, mz - pz * bw * 0.85);
+        const m1 = pt(mx + px * bw * 0.85, my, mz + pz * bw * 0.85);
+        const tp = pt(s + ca * L, y - L * 0.26, side * sa * L);
+        tri(bse, m1, m0); tri(m0, m1, tp);
+      }
     }
     const geo = new THREE.BufferGeometry();
     geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+    geo.setAttribute('color', new THREE.Float32BufferAttribute(tint, 3));
     geo.setIndex(idx); geo.computeVertexNormals();
     return geo;
   }
@@ -846,9 +908,12 @@ export function buildCity(scene, rng) {
   }
 
   const trunkGeo = palmTrunkGeometry();
-  // Three droop variants at most: 0.55 (gentle), 0.95 (arched), 1.32 (a real
-  // hanging tip). More variants would cost draws without reading differently.
-  const frondGeos = [palmFrondGeometry(0.55), palmFrondGeometry(0.95), palmFrondGeometry(1.32)];
+  // Three droop variants, all of them arched rather than hanging: 0.40 reads
+  // as a young upright frond, 0.66 is the classic arc, 0.95 is the old frond
+  // whose tip drops to the crown's foot. The old set went to 1.32, which at
+  // unit length drops the tip 0.98 m below the crown — a long hanging tassel
+  // that made the crown read as a willow, not a coconut.
+  const frondGeos = [palmFrondGeometry(0.40), palmFrondGeometry(0.66), palmFrondGeometry(0.95)];
   const trunks = new THREE.InstancedMesh(trunkGeo,
     // White base colour: instance colours multiply with it, so the per-palm
     // brown shades must be the instance colour, not a second tint on top.
@@ -856,6 +921,7 @@ export function buildCity(scene, rng) {
   trunks.name = 'palmTrunks';
   const m4 = new THREE.Matrix4(), q = new THREE.Quaternion(), qy = new THREE.Quaternion();
   const qz = new THREE.Quaternion(), qx = new THREE.Quaternion();
+  const qr = new THREE.Quaternion(), frondAxis = new THREE.Vector3(1, 0, 0);
   const s = new THREE.Vector3(), v = new THREE.Vector3();
   const tip = new THREE.Vector3(), tipLocalAxis = new THREE.Vector3(0, 0, 1);
   const spinAxis = new THREE.Vector3(0, 1, 0);
@@ -881,18 +947,31 @@ export function buildCity(scene, rng) {
     qx.setFromAxisAngle(new THREE.Vector3(1, 0, 0), -Math.PI / 2);
     m4.compose(new THREE.Vector3(x, groundY + 0.065, z), qx, s.set(1.25, 1.25, 1));
     pads.push(m4.clone());
-    // 10-14 fronds: azimuth, pitch and length all vary, so no two crowns are
-    // the same star. Fronds on a verge palm are kept shorter so no blade ever
-    // reaches across the asphalt (nearest road centre line minus 3 m).
+    // 16-20 fronds. The old 10-14 was counted against a 0.21 m-wide ribbon,
+    // where each blade was a big visible slab; with pinnate leaflets the same
+    // count leaves gaps you can see the sky through and the crown breaks up
+    // into a few green spikes. More blades at a smaller solid angle each is
+    // also what makes the silhouette stay a fan at 300 px instead of a star.
+    // Verge palms keep the shorter length so no blade crosses the asphalt.
     let clr = Infinity;
     for (const vx of VX) clr = Math.min(clr, Math.abs(x - vx));
     for (const hz of HZ) clr = Math.min(clr, Math.abs(z - hz));
     const maxLen = clr < 13 ? 2.9 : 3.35;
-    const nf = 10 + Math.floor(prng() * 5);       // 10..14
+    const nf = 16 + Math.floor(prng() * 5);       // 16..20
     for (let f = 0; f < nf; f++) {
-      const az = (f / nf) * Math.PI * 2 + (prng() - 0.5) * 0.55;
-      const tilt = -0.30 + prng() * 0.92;         // down-swept to near-level
+      // The last two blades are the spear: short, steep and upright in the
+      // middle of the crown. Real coconut palms always carry unopened leaves
+      // there, and at 300 px that little vertical crest is the cheapest,
+      // strongest "this is a palm, not a green star" cue in the whole model.
+      const spear = f >= nf - 3;
+      const az = (f / nf) * Math.PI * 2 + (prng() - 0.5) * 0.42;
+      // Spread the pitch wider than before and bias it down: the old range
+      // (-15°..+36°) put most blades near level, which is exactly the flat
+      // green disc the fault report describes. Now the top blades stand up,
+      // most sit near level and the bottom third really hang.
+      const tilt = spear ? 0.62 + prng() * 0.42 : -0.46 + prng() * 0.94;
       let len = 2.35 + prng() * (maxLen - 2.35);
+      if (spear) len *= 0.42 + prng() * 0.10;
       // R9/M2 — a blade may hang over the verge but never over a lane. Measured
       // on the shipped scene: 4 of 886 fronds crossed the carriageway edge
       // (nearest tip 5.76 m from a centre line, i.e. 0.24 m inside the 6 m
@@ -920,14 +999,28 @@ export function buildCity(scene, rng) {
       qy.setFromAxisAngle(spinAxis, az);
       qz.setFromAxisAngle(tipLocalAxis, tilt);
       qy.multiply(qz);
-      // Root sits 12 cm inside the crown: no gap, no visible pivot.
+      // Roll about the blade's own axis (-0.6..+0.6 rad): the leaflets then
+      // face the camera at every azimuth instead of every blade lying in one
+      // plane, which is what kept the crown reading as a flat card. It also
+      // means a blade seen edge-on still shows one side of its fan.
+      qr.setFromAxisAngle(frondAxis, (prng() - 0.5) * 1.2);
+      qy.multiply(qr);
+      // Root sits 12 cm inside the crown and is pushed out along its own
+      // azimuth with a vertical stagger. All fronds springing from one point
+      // leaves the middle of the crown as a see-through funnel — from below it
+      // reads as an open umbrella, not a palm. Fanning the roots across a
+      // ~0.25 m dome closes the funnel and thickens the crown's profile
+      // without adding a single triangle or a fourth mesh.
+      const ro = 0.09 + prng() * 0.14;
+      const rootY = -0.10 - prng() * 0.10;
       v.set(0, -0.12, 0).applyQuaternion(qy).add(tip);
+      v.x += Math.cos(az) * ro; v.y += rootY; v.z -= Math.sin(az) * ro;
       m4.compose(v, qy, s.set(len, len, len));
       // Droop variant cycles so all three shapes appear in every crown.
       const varIdx = f % 3;
       frondX.push(varIdx); frondMat.push(m4.clone());
-      frondCol.push(col.setHex(0x3a8a42).offsetHSL((prng() - 0.5) * 0.05,
-        0, (prng() - 0.5) * 0.20).getHex());
+      frondCol.push(col.setHex(0x3f9447).offsetHSL((prng() - 0.5) * 0.05,
+        0, (prng() - 0.5) * 0.18).getHex());
     }
   });
   trunks.count = placed.length;
@@ -935,7 +1028,9 @@ export function buildCity(scene, rng) {
   frondMat.forEach((m, i) => perVar[frondX[i]].push([m, frondCol[i]]));
   const frondMeshes = perVar.map((list, k) => {
     const mesh = new THREE.InstancedMesh(frondGeos[k],
-      new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.85, side: THREE.DoubleSide }),
+      new THREE.MeshStandardMaterial({
+        color: 0xffffff, roughness: 0.85, side: THREE.DoubleSide, vertexColors: true,
+      }),
       Math.max(1, list.length));
     mesh.name = 'palmFronds' + 'ABC'[k];
     list.forEach(([m, c], i) => { mesh.setMatrixAt(i, m); mesh.setColorAt(i, col.setHex(c)); });
