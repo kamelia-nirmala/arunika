@@ -113,9 +113,38 @@ parkCar('sedan', -225, 30, Math.PI, 0x2a4d6e);
 
 let camState = { pos: new THREE.Vector3(0, 40, 120), look: new THREE.Vector3(0, 0, 0), fov: 60 };
 let lastDamageT = -99, shakeT = 0, mapT = 0, hudT = 0, sirenOn = false;
+// A traffic/police car the player has taken over. Both systems drive their own
+// cars every frame (traffic pins its body to a road-graph rail, police keep
+// their pursuit throttle), so a taken-over car must leave its AI list or it
+// would yank itself out of the player's hands. Tracked here so it can be
+// released into g.cars — an ordinary car again — when the player steps out.
+let heldAiCar = null;
+function detachAiCar(v) {
+  const ti = g.traffic.cars.findIndex((c) => c.v === v);
+  if (ti >= 0) {
+    g.traffic.cars.splice(ti, 1);
+    heldAiCar = { v };
+    return;
+  }
+  const pi = g.police.cars.findIndex((u) => u.v === v);
+  if (pi >= 0) {
+    const u = g.police.cars.splice(pi, 1)[0];
+    // Its deployed officers were tied to that unit; they leave with it.
+    for (const o of u.officers || []) g.scene.remove(o.mesh.group);
+    u.officers = [];
+    heldAiCar = { v };
+  }
+}
 
 function resetGame() {
   for (const c of [...g.traffic.cars]) scene.remove(c.v.mesh.group);
+  // A car the player stole from traffic/police is no longer in either AI list
+  // and (until the player stepped out) not in g.cars either — drop it here so
+  // a reset never leaves a stray body in the world.
+  for (let i = g.cars.length - 1; i >= 0; i--) {
+    if (g.cars[i].fromAi) { scene.remove(g.cars[i].mesh.group); g.cars.splice(i, 1); }
+  }
+  if (heldAiCar) { scene.remove(heldAiCar.v.mesh.group); heldAiCar = null; }
   for (const p of [...g.peds.list]) scene.remove(p.mesh.group);
   clearPolice(g.police);
   for (const gg of [...g.gangs.list]) scene.remove(gg.mesh);
@@ -126,6 +155,7 @@ function resetGame() {
   g.player.stamina = 100; g.player.weapon = 'pistol';
   g.player.ammo = { pistol: 13, shotgun: 6, smg: 30 };
   g.player.reserve = { pistol: 60, shotgun: 24, smg: 90 };
+  g.player.jackTarget = null; heldAiCar = null;
   g.weapons.current = 'pistol'; g.weapons.reloading = 0;
   g.economy.money = 0; g.wanted.heat = 0; g.wanted.stars = 0;
   g.wanted.losT = 0; g.wanted.coolT = 0; g.overReason = null;
@@ -193,7 +223,27 @@ function step(dt) {
   // the identical vector.
   const aimVec = new THREE.Vector3();
   camera.getWorldDirection(aimVec);
-  stepPlayer(p, dt, g.cars, g.tide.t, aimVec);
+  // Every enterable vehicle: parked cars, traffic, and police cruisers. A
+  // traffic car is a wrapper ({v, speed, ...}) around the vehicle, so the
+  // controller gets the vehicles themselves — same shape as solidCars below.
+  // Without this the traffic cars (and cruisers) were never checked by
+  // nearestCar, so E only ever worked on the five parked cars.
+  const enterCars = g.cars.concat(
+    g.traffic.cars.map((c) => c.v),
+    g.police.cars.map((u) => u.v),
+  );
+  stepPlayer(p, dt, enterCars, g.tide.t, aimVec);
+  // A traffic/police car the player is climbing into or driving leaves its AI
+  // list for good: traffic would otherwise snap the body back onto its rail
+  // and police would keep throttling it. On exit the car becomes an ordinary
+  // parked car (g.cars), so it stays enterable and never resurrects its AI.
+  if (p.mode === 'jacking' && p.jackTarget && !heldAiCar) detachAiCar(p.jackTarget);
+  if (!p.car && heldAiCar && (p.mode === 'foot' || p.mode === 'driving')) {
+    // Even a wreck rejoins g.cars so it stays a solid body (nearestCar skips
+    // dead cars, peds still collide with it).
+    heldAiCar.v.fromAi = true; g.cars.push(heldAiCar.v);
+    heldAiCar = null;
+  }
   // Carjacked a car with a driver: heat + panicking witnesses.
   if (prevMode === 'jacking' && p.mode === 'driving') {
     addHeat(g.wanted, 8);
@@ -212,10 +262,14 @@ function step(dt) {
       }
     }
   }
-  // Traffic cars running over the player on foot.
+  // Traffic cars running over the player on foot. Only a MOVING car hurts:
+  // a car stopped at a red light, pulled over for a siren, or frozen in the
+  // lane must not shove the player away — otherwise they could never stand
+  // beside it long enough to press E.
   if (p.mode === 'foot') {
     for (const c of g.traffic.cars) {
-      if (Math.hypot(c.v.pos.x - p.pos.x, c.v.pos.z - p.pos.z) < 2.2) {
+      if (c.speed > 1
+        && Math.hypot(c.v.pos.x - p.pos.x, c.v.pos.z - p.pos.z) < 2.2) {
         damagePlayer(20); addHeat(g.wanted, 12);
         panicPeds(g.peds, p.pos.x, p.pos.z, 25);
         p.pos.x += (p.pos.x - c.v.pos.x) * 0.5; p.pos.z += (p.pos.z - c.v.pos.z) * 0.5;
@@ -225,8 +279,12 @@ function step(dt) {
   sirenOn = g.wanted.stars >= 2;
   updateTraffic(g.traffic, dt, p, sirenOn);
   // Cars are passed in so a ped cannot walk into a parked body (see updatePeds).
-  const solidCars = g.cars.concat(g.traffic.cars.map((c) => c.v));
-  updatePeds(g.peds, dt, p, solidCars);
+  // A stolen traffic/police car is in neither list, so add the player's own car.
+  const solidCars = p.car ? g.cars.concat(g.traffic.cars.map((c) => c.v), [p.car])
+    : g.cars.concat(g.traffic.cars.map((c) => c.v));
+  // Pedestrians get the road graph too: spawns snap to sidewalks and walkers
+  // are steered off the asphalt (see updatePeds).
+  updatePeds(g.peds, dt, p, solidCars, g.roads);
   // Police "near" for the wanted cooldown: cruisers, on-foot officers, and
   // the helicopter all keep eyes on the player.
   const policeNear = g.police.cars.some((u) => Math.hypot(u.v.pos.x - p.pos.x, u.v.pos.z - p.pos.z) < 60)
@@ -262,17 +320,20 @@ function step(dt) {
   }
   // Pay off wanted at the Waringin Tepi hideout (E, on foot, no car near).
   // stepPlayer already consumed E when a car was in range (entering the car
-  // takes priority), so any E reaching here means no car was near. Every
-  // press is consumed here with feedback — a too-early E now toasts
-  // instead of silently vanishing, and nothing stays queued to fire later.
+  // takes priority), so any E reaching here means no enterable car was near.
+  // Every press is consumed here with feedback — and the message says what
+  // actually happened: the old blanket "Terlalu jauh dari mobil" claimed a
+  // distance problem even while standing right beside a car or the hideout.
   if (p.mode === 'foot' && input.edge('enter')) {
     const d = Math.hypot(p.pos.x + 270, p.pos.z - 0);
-    if (d < 12 && g.wanted.stars > 0) {
-      const r = tryPayoff(g.wanted, g.economy.money, policeNear);
-      if (r.ok) { g.economy.money -= r.cost; toast(`Suap dibayar — Rp ${r.cost.toLocaleString('id-ID')}. Buruan hilang.`); }
-      else toast('Tidak cukup uang atau polisi terlalu dekat');
+    if (d < 12) {
+      if (g.wanted.stars > 0) {
+        const r = tryPayoff(g.wanted, g.economy.money, policeNear);
+        if (r.ok) { g.economy.money -= r.cost; toast(`Suap dibayar — Rp ${r.cost.toLocaleString('id-ID')}. Buruan hilang.`); }
+        else toast('Tidak cukup uang atau polisi terlalu dekat');
+      } else toast('Tidak ada buronan yang perlu dibayar di sini');
     } else {
-      toast('Terlalu jauh dari mobil');
+      toast('Tidak ada kendaraan di dekatmu');
     }
   }
   // Weapons.
