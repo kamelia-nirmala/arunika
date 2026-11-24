@@ -10,7 +10,7 @@
 import * as THREE from 'three';
 import { createVehicle, stepVehicle } from '../physics/vehicle.js';
 import { clamp, lerp, range } from '../random.js';
-import { groundHeight } from '../world/roads.js';
+import { groundHeight, clampToBridgeDeck } from '../world/roads.js';
 import { resolveCircle } from '../physics/collision.js';
 
 // Arrest tuning: officer run speed sits between the player's walk (4.2) and
@@ -326,10 +326,15 @@ export function updatePolice(pol, dt, player, stars, time) {
       if (!onFoot || od > RECALL_DIST) { removeOfficer(pol, u, o); continue; }
       const dx = player.pos.x - o.pos.x, dz = player.pos.z - o.pos.z;
       const len = od || 1;
+      const yBefore = groundHeight(o.pos.x, o.pos.z, 0.5); // surface before this step
       o.pos.x += (dx / len) * OFFICER_SPEED * dt;
       o.pos.z += (dz / len) * OFFICER_SPEED * dt;
       o.heading = Math.atan2(dx, dz);
       resolveCircle(o.pos, 0.4);
+      // Same parapet rule as the player and the crowd: an officer chasing a
+      // player across the Sekarwangi span is held inside the rails instead of
+      // running off the deck and falling into the river.
+      clampToBridgeDeck(o.pos, yBefore, 0.4);
       o.mesh.group.position.set(o.pos.x, groundHeight(o.pos.x, o.pos.z, 0.5), o.pos.z);
       o.mesh.group.rotation.y = o.heading;
       const swing = Math.sin(time * 11 + o.pos.x) * 0.45;
