@@ -7,6 +7,7 @@
 // is positioned where another one already lives — minimap bottom-left,
 // vitals beside it, equipment + speed bottom-right, mission + wanted top.
 import { ARREST_TIME } from '../ai/police.js';
+import { input } from '../input.js';
 const $ = (id) => document.getElementById(id);
 let els = null;
 export function bindHud() {
@@ -21,7 +22,7 @@ export function bindHud() {
     carCond: $('car-cond'), carFill: $('car-fill'), carLabel: $('car-label'),
     money: $('money'), clock: $('clock'), radio: $('radio-name'),
     weapon: $('weapon-name'), ammo: $('ammo'), toast: $('toast'), fps: $('fps'),
-    enterPrompt: $('enter-prompt'),
+    enterPrompt: $('enter-prompt'), crosshair: $('crosshair'),
   };
 }
 function starStr(n) {
@@ -93,6 +94,16 @@ export function updateHud(g, dt) {
   els.weapon.textContent = g.weapons ? { pistol: 'KOBRA-9', shotgun: 'BANDOT-12', smg: 'TAWON-45' }[w] : '';
   els.ammo.textContent = p.ammo[w] + ' / ' + p.reserve[w];
   if (g.fps) els.fps.textContent = Math.round(g.fps) + ' fps';
+  // Crosshair: a readout of the aim line, so it is only up when the player is
+  // actually aiming (right mouse) or firing (left mouse) on foot. Turned amber
+  // while the trigger is down. Re-asserted each HUD tick so it clears the
+  // moment aiming stops — the same pattern as the E prompt below.
+  if (els.crosshair) {
+    const onFoot = g.state === 'play' && p.mode === 'foot';
+    const firing = input.held('fire');
+    els.crosshair.classList.toggle('show', onFoot && (input.held('aim') || firing));
+    els.crosshair.classList.toggle('hot', onFoot && firing);
+  }
   // "TEKAN E" prompt: on foot and a live car is within enter range.
   // Re-asserted every HUD tick so it hides the moment the player walks away.
   if (els.enterPrompt) {
