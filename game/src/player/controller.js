@@ -2,7 +2,7 @@
 // chase camera. The controller owns the player state; main.js owns the loop.
 import * as THREE from 'three';
 import { clamp, lerp, angleLerp } from '../random.js';
-import { groundHeight } from '../world/roads.js';
+import { groundHeight, clampToBridgeDeck } from '../world/roads.js';
 import { resolveCircle, cameraBlockT } from '../physics/collision.js';
 import { createVehicle, stepVehicle, surfaceAt } from '../physics/vehicle.js';
 import { input } from '../input.js';
@@ -191,20 +191,29 @@ export function stepPlayer(p, dt, cars, tide, aim) {
   // Displacement follows the INPUT direction, not the facing: strafing
   // (A/D) moves purely sideways from the first step instead of drifting
   // forward while the facing catches up. Heading only turns the figure.
+  const yBefore = p.pos.y; // ground the figure stood on before this step
   p.pos.x += mx * p.speed * dt;
   p.pos.z += mz * p.speed * dt;
+  // The bridge parapets are meshes with no collision box, so walking into one
+  // used to put the player through it and 7.3 m down into the river. Clamp
+  // the step back inside the deck width whenever the figure was already on
+  // the span. (Cheap: one band test, no box added to resolveCircle.)
+  clampToBridgeDeck(p.pos, yBefore, 0.45);
   p.pos.y = groundHeight(p.pos.x, p.pos.z, tide);
   resolveCircle(p.pos, 0.45);
   p.mesh.group.visible = true; // on foot the figure is visible (synced below)
   if (sprint && ml > 0) p.stamina = Math.max(0, p.stamina - 12 * dt);
   else p.stamina = Math.min(100, p.stamina + 18 * dt);
-  // Walk cycle + aim pose. While the trigger is held the gun arm rises to
-  // the camera aim line (arm forward, pitched down with the camera), the
-  // body turns to face the aim direction, and the support arm comes up to
-  // the gun; both ease back down when the trigger is released. The heading
-  // turn only applies while aiming — movement direction is untouched, so
-  // the R2 A/D fix is not affected.
-  const aiming = input.held('fire');
+  // Walk cycle + aim pose. The gun arm rises to the camera aim line (arm
+  // forward, pitched down with the camera), the body turns to face the aim
+  // direction, and the support arm comes up to the gun; both ease back down
+  // when it is released. The pose is held while AIMING (right mouse) OR while
+  // FIRING (left mouse): the pistol, muzzle and tracer all follow the same
+  // arm line, so posing on the trigger too keeps them pointing the same way in
+  // every mode instead of the gun dropping to the hip between shots. Aiming
+  // never shoots, and the heading turn only applies while posed — movement
+  // direction is untouched, so the R2 A/D fix is not affected.
+  const aiming = input.held('aim') || input.held('fire');
   // Aiming: the BODY faces the aim vector's azimuth, and the arm is solved
   // from the aim vector itself. The body used to turn to `camYaw` while the
   // shot went along the camera forward — 7.2° apart in the street shot, which
@@ -312,6 +321,11 @@ export function cameraFor(p, dt, out) {
   const lx = target.pos.x + Math.sin(p.mode === 'driving' ? target.heading : p.camYaw) * 1.8;
   const lz = target.pos.z + Math.cos(p.mode === 'driving' ? target.heading : p.camYaw) * 1.8;
   out.look.set(lx, target.pos.y + 1.3, lz);
-  out.fov = lerp(out.fov, 60 + clamp(spd / top, 0, 1) * 18 + (p.car && p.car.drift ? 6 : 0), clamp(dt * 3, 0, 1));
+  // Aiming tightens the lens on foot: the world narrows toward the aim line
+  // (the out.fov lerp below does the easing). Driving keeps its speed FOV.
+  const fovTarget = (p.mode === 'foot' && input.held('aim'))
+    ? 45
+    : 60 + clamp(spd / top, 0, 1) * 18 + (p.car && p.car.drift ? 6 : 0);
+  out.fov = lerp(out.fov, fovTarget, clamp(dt * 3, 0, 1));
   return out;
 }
