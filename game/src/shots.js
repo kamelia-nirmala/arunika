@@ -253,14 +253,37 @@ export function stageShot(name, game) {
       // common staging block above. Roadblock only exists at ★3+, and
       // updatePolice leaves pol.blocks alone because it is non-empty.
       game.missions.job = JOBS[3]; game.missions.obj = 0;
-      // Roadblock: 5.0 m spacing on 4.7 m-long bodies, so the three cars close
-      // the carriageway while keeping a 0.3 m gap between bumpers. R8/M4b: at
-      // 4.8 m the gaps were 10 cm and the vision pass read the block as
-      // cruisers "merged and clipping into one another" — a 0.3 m gap is still
-      // a wall, but each body reads separately.
-      stageBlock(game, -49.8, -219);
-      stageBlock(game, -44.8, -219);
-      stageBlock(game, -39.8, -219);
+      // R9/M3 — the "cream slab behind the pylon" is this job's own objective
+      // marker, not a second pylon. Measured (2 px raycast grid over the
+      // x 660..760 / y 160..340 band of the frame): 1104 of 4641 samples hit
+      // the live mission beacon — CylinderGeometry(2.2, 2.2, 30, 12, open),
+      // color 0xf5a623, opacity 0.21, at (-45, 15, -320), i.e. 136 m out on
+      // this camera's axis — projected to x 698..718, y 178..288: a 21 px
+      // wide, flat-topped translucent column with sky between it and the
+      // pylon (728..760). Two pale forms side by side read as a double post.
+      // Same fault, same verdict as the vista note further down: a beacon
+      // column next to a bridge mast reads as an artifact, so the marker is
+      // not drawn in this still. Only the mesh leaves the scene — the job and
+      // objective are untouched, so the HUD keeps reading 1/2 and 124 m and
+      // the mission engine keeps working exactly as before (it only writes
+      // the beacon's pose, which is harmless on an unparented object).
+      game.scene.remove(game.missions.beacon);
+      // Roadblock: the three cars close the carriageway while keeping a gap at
+      // each bumper that still reads as three bodies, not one wall.
+      // R9/M3 — the spacing was wrong: R8/M4b sized it on `spec.len` (4.7) and
+      // claimed a 0.3 m gap, but the body a driver sees is 4.94 m long (the
+      // 0.28 m bumper on each end hangs 0.12 m past spec.len/2), so 5.0 m
+      // spacing measured a 0.06 m gap. World AABBs of the three solid groups
+      // (contact-shadow decal excluded) at 5.0 m: x -52.27..-47.33,
+      // -47.27..-42.33, -42.27..-37.33 → clearances 0.06 / 0.06 m, i.e. 0.6 px
+      // at 120 m, and the frame read as one fused black band (a 4 px screen
+      // overlap at the 1-2 join). 5.24 m spacing makes the real gap 0.30 m
+      // (~3 px) — the gap R8/M4b intended — with the centre car unmoved, so the
+      // wall still spans the whole 12 m carriageway and the hero car's sight
+      // line does not change.
+      stageBlock(game, -50.04, -219);
+      stageBlock(game, -44.80, -219);
+      stageBlock(game, -39.56, -219);
       // Pursuers: two flanking the sedan on the shoulders (clear of its
       // silhouette and of the sight line to it), one just behind the camera,
       // one beyond the block for depth. R7/M4 dropped the second car behind
@@ -323,8 +346,12 @@ export function stageShot(name, game) {
       // fills the middle band dead on the view axis, the helicopter hangs in
       // the upper right. fov 58 keeps both facades in frame without the
       // wide-angle smear the old 30 m chase cam produced.
+      // R9/M2 — fov 58 -> 60 for the same measured reason as the vista: the
+      // right-hand sign column sat at 19 px (LAUNDRY KILAT x 1223..1260) and
+      // the cover carries the same GORENGAN PANAS facade on the right edge.
+      // 60 puts the tightest board at 44 px with no world geometry moved.
       game.camOverride = {
-        pos: { x: -42.0, y: 6.2, z: -184.0 }, look: { x: -46.5, y: 2.4, z: -219.0 }, fov: 58,
+        pos: { x: -42.0, y: 6.2, z: -184.0 }, look: { x: -46.5, y: 2.4, z: -219.0 }, fov: 60,
       };
       // Golden-hour fill. At 17.35 the sun sits ~19° up and ~20° west, so its
       // incidence on the flat road is only ~0.33 — measured on the previous
@@ -386,7 +413,25 @@ export function stageShot(name, game) {
         if (marks[i]) gm.pos.set(marks[i][0], 0, marks[i][1]);
         gm.shootT = 9; // hold fire: a hit in the last steps would shake the frame
       });
-      game.missions.job = JOBS[5]; game.missions.obj = 0;
+      // R9/M4 — the card used to run JOBS[5] ("Bidikan di Pasar Ikan") obj 0,
+      // "Usir 5 anak buah Garda Besi". The gang in this frame is not the
+      // subject: the man on the aim line is a POLICE OFFICER (peaked cap,
+      // hi-vis vest, cruiser with its lightbar behind him) and wanted is ★3, so
+      // the card named the wrong enemy — the player is shooting at bea cukai's
+      // men while the picture shows the police. The card now runs the one job
+      // in the game that is about being hunted by police, JOBS[7] (id 8)
+      // "Lampu Merah Muara", obj 0 — "Kabur ke lumpur surut (tunggu air surut)",
+      // the escape from the raided safehouse. No new wording: that string is
+      // already in jobs.js. The staging (Raka, the gang stand-ins, the cruisers)
+      // is untouched; only which job the HUD reads changed.
+      // The beacon follows the objective, so this step also moves it from
+      // (60,-420) — 197 m out and off the left edge, x -122, i.e. never in the
+      // picture — to (180,-315). Measured through this camera it projects to
+      // x 725..747, y 200..350, but a raycast down its axis at 2/8/15/22/28 m
+      // hits the same building face 24.9 m out at every height, so the column
+      // stays behind that wall; the render below is the check on that.
+      // Distance: Raka stands at (60,-228), 148 m from (180,-315).
+      game.missions.job = JOBS[7]; game.missions.obj = 0;
       // Cruisers brake in. The near one stops 12 m off Raka's right, on the
       // open verge — close enough for updatePolice to deploy its officer
       // (deploy radius 22 m), far enough that the officer walks out into open
@@ -539,14 +584,20 @@ export function stageShot(name, game) {
       // open (main.js), so updatePolice never runs and never spawns a unit.
       // R8/M4a — the HUD distance has to differ from the other three judge
       // shots. JOBS[0] obj 0 ("Ambil pikap di dermaga", 60,-380) measured 124 m
-      // here — the same number cover prints. The job stays JOBS[0], so the
-      // title on the card still matches the dialog Hasan is speaking; the chain
-      // just sits one link further on, at obj 1 ("Lepaskan penagih utang") =
-      // the escape point (-200,-320), 301 m from this pose. Four judge
-      // distances: 124 / 192 / 301 / 206 — all different, all measured. That
-      // beacon is 77° off this camera's forward axis, i.e. outside the frame,
-      // so nothing new appears in the picture.
-      game.missions.job = JOBS[0]; game.missions.obj = 1;
+      // here — the same number cover prints.
+      // R9/M4 — the card used to run this job's escape link, obj 1
+      // ("Lepaskan penagih utang — jangan berhenti"). That is driving advice
+      // shouted over a chase, and this frame is the opposite of a chase: two
+      // men standing still at a fish kiosk, talking, no vehicle and no pursuit
+      // in it. The card now shows the same job's LAST link, obj 2 ("Kembali ke
+      // kios Hasan", 120,-400), which is the thing the frame actually depicts —
+      // Raka back at Hasan's kiosk with Hasan speaking. No new wording: the
+      // string is the one this job already carries. Raka stands 141 m from that
+      // point, so the four judge distances are 124 / 148 / 141 / 206 — still all
+      // different, all measured. Its beacon is never posed here: step() never
+      // reaches updateMissions while the dialog is open, so nothing new appears
+      // in the picture.
+      game.missions.job = JOBS[0]; game.missions.obj = 2;
       // Hasan's stand-in (the game has no named-character mesh). Recolour him
       // to the job's own palette (Hasan = blue shirt, amber accent) so the two
       // figures are told apart in the frame.
@@ -834,9 +885,41 @@ export function stageShot(name, game) {
       stageCruiser(game, -49.0, -170, Math.PI);
       stageCruiser(game, -57.5, -176, Math.PI);
       stageCruiser(game, -44.0, -172, Math.PI);
+      // R9/M1 — the ramp foot has to be legible, so the camera steps back
+      // 20 m and rises 3 m from the R7 pose (z -192/y 19 -> z -172/y 22) and
+      // the aim swings further west (look.x -72 -> -94, fov 56 -> 58). What
+      // that buys, measured by projection against the same eight anchors:
+      // the toe (z -240, the road/ramp junction this pass repairs) moves from
+      // 46 m out to 65 m and from y 642 (against the bottom edge, where the
+      // queued traffic already covers it) up to y 570; the toe's west and east
+      // corners land at x 738/1024 instead of 685/1091, so the whole 26 m
+      // junction sits inside the frame instead of being clipped by both side
+      // edges. The pylon tip, which R7 stated sat "at y≈38" and was in fact
+      // cropped by the top edge, now projects to y 81 with sky above it; the
+      // Tanjung Mas tower still runs off the right edge (left corner x 1061,
+      // right corner x 1311) exactly as the R6 note intends, so the R6
+      // composition survives. Deck far end y 406, road at z -232 y 600.
+      // R9/M2 — the fascia and the right-edge column were the two faults left
+      // by R9/M1, and both are measurable with the probe (board corners
+      // projected through the shot camera):
+      //   * kioskSign:GORENGAN at (-33.03,-214) projected to y 682..725 — its
+      //     bottom 6 px were outside the frame (bottom margin -6), so the very
+      //     "GORENGAN" sign this pass is about read as sliced by the bottom
+      //     edge;
+      //   * the right-hand sign column was at 13–19 px (ES KELAPA MUDA
+      //     x 1232..1266, GORENGAN PANAS x 1155..1263) — inside, but tight
+      //     enough that any re-render or resize would crop it.
+      // Widening alone (fov 58 -> 60 on the old aim) fixed those but dragged a
+      // sliver of the opposite facade in at the LEFT edge: shopSign:WARUNG KOPI
+      // then projected to x -59..7. So the aim moves too: 6 m east and 3 m
+      // lower (look -94/19 -> -88/16), which is a 2° yaw and a 1° pitch, small
+      // enough to keep the R6/R7 composition (pylon on the right third, deck
+      // running away to the left) and large enough to clear both edges.
+      // Result, same probe: 0 clipped boards, worst margins left 232 / right
+      // 78 / top 377 / bottom 32 px, up from 1 clipped and 13 px.
       game.camOverride = {
-        pos: { x: -56.0, y: 19.0, z: -192.0 },
-        look: { x: -72.0, y: 20.0, z: -330.0 }, fov: 56,
+        pos: { x: -52.0, y: 22.0, z: -172.0 },
+        look: { x: -88.0, y: 16.0, z: -340.0 }, fov: 60,
       };
       // Foreground: the queued traffic on the flat approach (the ramp only
       // lifts north of z=-240, and these props are never stepped, so anything
